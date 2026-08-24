@@ -1,0 +1,9 @@
+[package]
+name = "pz-archive"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pz-core = { workspace = true }
+zip = { workspace = true }

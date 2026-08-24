@@ -1,0 +1,13 @@
+[package]
+name = "pz-img"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pz-core = { workspace = true }
+image = { workspace = true }
+
+# Text rasterization for the image watermark tool (pure Rust, wasm-safe).
+[dependencies.ab_glyph]
+version = "0.2"

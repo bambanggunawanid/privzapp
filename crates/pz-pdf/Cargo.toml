@@ -1,0 +1,16 @@
+[package]
+name = "pz-pdf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pz-core = { workspace = true }
+lopdf = { workspace = true }
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+lopdf = { workspace = true, features = ["wasm_js"] }
+
+[dev-dependencies]
+# Test fixtures only: build tiny JPEGs to embed. Not a runtime dependency.
+image = { workspace = true }

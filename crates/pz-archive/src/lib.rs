@@ -1,0 +1,133 @@
+//! ZIP create/extract, fully in memory, wasm32-safe.
+//!
+//! Security guards:
+//! - Zip-slip: entry names are flattened to their final path component, so a
+//!   crafted "../../etc/passwd" entry can never influence where a caller
+//!   saves the file.
+//! - Zip bombs: extraction stops past hard total/per-file limits instead of
+//!   exhausting browser memory.
+
+#![forbid(unsafe_code)]
+
+use std::io::{Cursor, Read, Write};
+
+use pz_core::{OutputFile, PzError};
+use zip::write::SimpleFileOptions;
+use zip::{CompressionMethod, ZipArchive, ZipWriter};
+
+/// Hard ceilings for in-memory extraction (browser tabs get ~2-4 GB).
+const MAX_TOTAL_UNCOMPRESSED: u64 = 1 << 30; // 1 GiB
+const MAX_FILE_UNCOMPRESSED: u64 = 512 << 20; // 512 MiB
+
+/// Bundle files into one deflate-compressed ZIP.
+pub fn create(files: &[(String, Vec<u8>)]) -> Result<Vec<u8>, PzError> {
+    if files.is_empty() {
+        return Err(PzError::Invalid("add at least one file".into()));
+    }
+    let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+    for (name, bytes) in files {
+        let safe_name = sanitize(name);
+        writer
+            .start_file(safe_name, options)
+            .map_err(|e| PzError::Failed(format!("could not add \"{name}\": {e}")))?;
+        writer
+            .write_all(bytes)
+            .map_err(|e| PzError::Failed(format!("could not write \"{name}\": {e}")))?;
+    }
+    let cursor = writer
+        .finish()
+        .map_err(|e| PzError::Failed(format!("could not finalize archive: {e}")))?;
+    Ok(cursor.into_inner())
+}
+
+/// Extract every file entry of a ZIP archive.
+pub fn extract(bytes: &[u8]) -> Result<Vec<OutputFile>, PzError> {
+    let mut archive = ZipArchive::new(Cursor::new(bytes))
+        .map_err(|e| PzError::Failed(format!("could not read archive: {e}")))?;
+    let mut outputs = Vec::new();
+    let mut total: u64 = 0;
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| PzError::Failed(format!("could not read entry {i}: {e}")))?;
+        if entry.is_dir() {
+            continue;
+        }
+        if entry.size() > MAX_FILE_UNCOMPRESSED {
+            return Err(PzError::Unsupported(format!(
+                "\"{}\" is larger than the in-browser limit ({} MB)",
+                entry.name(),
+                MAX_FILE_UNCOMPRESSED >> 20
+            )));
+        }
+        total = total.saturating_add(entry.size());
+        if total > MAX_TOTAL_UNCOMPRESSED {
+            return Err(PzError::Unsupported(
+                "archive expands past the in-browser limit (1 GB)".into(),
+            ));
+        }
+        let name = sanitize(entry.name());
+        let mut data = Vec::with_capacity(entry.size() as usize);
+        entry
+            .read_to_end(&mut data)
+            .map_err(|e| PzError::Failed(format!("could not extract \"{name}\": {e}")))?;
+        outputs.push(OutputFile {
+            name,
+            mime: "application/octet-stream",
+            bytes: data,
+        });
+    }
+    if outputs.is_empty() {
+        return Err(PzError::Invalid("archive contains no files".into()));
+    }
+    Ok(outputs)
+}
+
+/// Keep only the final path component and strip anything path-traversal-ish.
+fn sanitize(name: &str) -> String {
+    name.replace('\\', "/")
+        .split('/')
+        .rfind(|s| !s.is_empty() && *s != "." && *s != "..")
+        .map(str::to_string)
+        .unwrap_or_else(|| "file".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zip_unzip_roundtrip() {
+        let files = vec![
+            ("a.txt".to_string(), b"hello".to_vec()),
+            ("b.bin".to_string(), vec![0u8; 1000]),
+        ];
+        let archive = create(&files).unwrap();
+        let out = extract(&archive).unwrap();
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].name, "a.txt");
+        assert_eq!(out[0].bytes, b"hello");
+        assert_eq!(out[1].bytes.len(), 1000);
+    }
+
+    #[test]
+    fn deflate_actually_compresses() {
+        let files = vec![("zeros.bin".to_string(), vec![0u8; 100_000])];
+        let archive = create(&files).unwrap();
+        assert!(archive.len() < 10_000);
+    }
+
+    #[test]
+    fn sanitizes_traversal_names() {
+        assert_eq!(sanitize("../../etc/passwd"), "passwd");
+        assert_eq!(sanitize("dir/sub/file.txt"), "file.txt");
+        assert_eq!(sanitize("windows\\path\\x.doc"), "x.doc");
+        assert_eq!(sanitize("///"), "file");
+    }
+
+    #[test]
+    fn rejects_empty_input() {
+        assert!(create(&[]).is_err());
+    }
+}

@@ -1,0 +1,16 @@
+[package]
+name = "pz-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pz-core = { workspace = true }
+pz-img = { workspace = true }
+pz-pdf = { workspace = true }
+pz-archive = { workspace = true }
+pz-crypto = { workspace = true }
+
+[dev-dependencies]
+# Test fixtures only: build tiny images for the favicon-pack roundtrip.
+image = { workspace = true }

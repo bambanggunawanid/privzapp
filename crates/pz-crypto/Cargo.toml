@@ -1,0 +1,14 @@
+[package]
+name = "pz-crypto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+aes-gcm = { workspace = true }
+sha2 = { workspace = true }
+pbkdf2 = { workspace = true }
+
+# aes-gcm's RNG (rand_core/getrandom 0.2) needs the js backend on the web.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }
