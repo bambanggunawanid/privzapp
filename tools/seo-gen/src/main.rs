@@ -22,7 +22,7 @@ const SPLASH_STYLE: &str = r#"<style>html{background:#0b0e14}#pz-splash{position
 
 /// Splash markup. No-JS visitors get the (styled) prerender instead, and
 /// a fallback fade reveals it if the wasm somehow never arrives.
-const SPLASH_HTML: &str = r#"<div id="pz-splash"><img src="/icon-192.png" alt=""><span>PrivZapp is loading…</span></div><noscript><style>#pz-splash{display:none}</style></noscript><script>setTimeout(function(){var s=document.getElementById('pz-splash');if(s){s.classList.add('pz-done');setTimeout(function(){s.remove()},300)}},8000)</script>"#;
+const SPLASH_HTML: &str = r#"<div id="pz-splash"><img src="/splash-168.png" alt="" fetchpriority="high"><span>PrivZapp is loading…</span></div><noscript><style>#pz-splash{display:none}</style></noscript><script>setTimeout(function(){var s=document.getElementById('pz-splash');if(s){s.classList.add('pz-done');setTimeout(function(){s.remove()},300)}},8000)</script>"#;
 
 fn main() {
     let out = env::args()
@@ -46,7 +46,14 @@ fn main() {
         })
         .map(|css| format!(r#"<link rel="stylesheet" href="/assets/{css}">"#))
         .unwrap_or_default();
-    let template = template.replacen("</head>", &format!("{css_link}{SPLASH_STYLE}</head>"), 1);
+    // Preload the splash logo (the LCP element) so the browser fetches it
+    // alongside the stylesheet instead of after parsing the body.
+    let preload = r#"<link rel="preload" as="image" href="/splash-168.png" fetchpriority="high">"#;
+    let template = template.replacen(
+        "</head>",
+        &format!("{preload}{css_link}{SPLASH_STYLE}</head>"),
+        1,
+    );
 
     // Tool pages.
     for tool in TOOLS {
@@ -138,8 +145,28 @@ fn main() {
     )
     .unwrap();
 
+    // llms.txt — plain-markdown site map for AI agents (the llms.txt
+    // convention), so agents get the tool list without booting the wasm.
+    let mut llms = String::from(
+        "# PrivZapp\n\n> Free in-browser file tools (PDF, image, archive, encryption). \
+         All processing happens on-device via WebAssembly — files are never uploaded, \
+         there are no accounts and no tracking.\n\n## Tools\n",
+    );
+    for tool in TOOLS {
+        let seo = seo_for(tool.slug).expect("checked above");
+        llms.push_str(&format!(
+            "- [{}]({base}/tool/{}): {}\n",
+            tool.name, tool.slug, seo.description
+        ));
+    }
+    llms.push_str(&format!(
+        "\n## Pages\n- [Privacy]({base}/privacy): how on-device processing works\n\
+         - [Support]({base}/support): donations keep PrivZapp free\n"
+    ));
+    fs::write(out.join("llms.txt"), llms).unwrap();
+
     println!(
-        "seo-gen: {} tool pages + home, privacy, support, sitemap.xml, robots.txt ({base})",
+        "seo-gen: {} tool pages + home, privacy, support, sitemap.xml, robots.txt, llms.txt ({base})",
         TOOLS.len()
     );
 }

@@ -722,6 +722,25 @@ a:hover { text-decoration: underline; }
 .ed-canvas[data-pz-mode="pan"] .pz-img { pointer-events: none; }
 .ed-canvas[data-pz-mode="pan"] .pz-textlayer span { cursor: grab; }
 .pz-thumb.dragging { opacity: 0.4; }
+/* "Stack another PDF below" tile at the end of the page rail; a label so
+   the browser opens the shared #append-in file input. */
+.ed-addpdf {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 14px 6px;
+  border: 2px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+.ed-addpdf:hover { border-color: var(--accent); color: var(--text); }
+.ed-addpdf-plus { font-size: 1.2rem; line-height: 1; }
 .ed-thumbhint {
   font-size: 0.72rem;
   color: var(--muted);

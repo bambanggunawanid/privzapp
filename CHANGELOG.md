@@ -128,7 +128,29 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
 - Image uploads now show real thumbnails (one per file) instead of
   name-and-size rows, so you can see what actually got picked.
 
+### Added
+- Security hardening pass (ADR-0008): nginx now serves a
+  Content-Security-Policy that makes "files never leave your device"
+  browser-enforced — `connect-src 'self'` means the page cannot phone
+  home anywhere — plus nosniff/frame-deny/referrer/permissions headers.
+  Engine parsers reject decompression bombs with clear errors instead of
+  exhausting tab memory (20 000 px image decode cap, 64 MP resize/upscale
+  ceiling, ZIP limits enforced on actual inflated bytes — lying size
+  headers are caught). A `cargo audit` RustSec scan runs as its own CI job.
+- `llms.txt` is prerendered alongside sitemap/robots: an agent-facing
+  site map with the tool list and the privacy model.
+- PDF editor: "＋ Append PDF" tile at the bottom of the page rail —
+  merge another PDF into the open one; its pages stack below the last
+  page. (The operation existed buried in the inspector; now it is
+  discoverable, and a UI test pins the stacking order.)
+
 ### Changed
+- Lighthouse pass: the nav brand ships as a 4 KB 56-px logo cut (it was
+  reusing the 76 KB 256-px favicon), the loading splash as a right-sized
+  168-px asset, and `gen-icons.py` writes adaptively-filtered PNGs — every
+  derived icon shrinks, losslessly. The container precompresses the
+  bundle at build time and nginx serves the `.gz` siblings
+  (`gzip_static`), so the multi-MB wasm goes over the wire ~3x smaller.
 - Editor defaults: the cursor (select/move/edit) tool is active on
   open — drawing is now an explicit choice.
 - The PDF editor is now a Figma-style workspace: full-viewport dark

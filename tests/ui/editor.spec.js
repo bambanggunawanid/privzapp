@@ -42,6 +42,23 @@ test.describe("editor workspace", () => {
     await expect(page.locator(".pz-thumb").first()).toHaveClass(/active/);
   });
 
+  test("append PDF stacks the imported pages below the last page", async ({ page }) => {
+    await openPdf(page);
+    // The rail offers a visible tile wired to the shared #append-in input.
+    await expect(page.locator(".ed-addpdf")).toBeVisible();
+    await page.setInputFiles("#append-in", {
+      name: "second.pdf",
+      mimeType: "application/pdf",
+      buffer: samplePdf(),
+    });
+    // 2 + 2 pages, original first page still on top.
+    await expect(page.locator(".pz-page")).toHaveCount(4, { timeout: 30_000 });
+    await expect(page.locator(".pz-thumb")).toHaveCount(4);
+    await expect(page.locator("#pz-pageno")).toHaveText("1 / 4");
+    await expect(page.locator(".pz-page").first().locator(".pz-textlayer"))
+      .toContainText("Hello PrivZapp", { timeout: 15_000 });
+  });
+
   test("text tool activates (regression: used to stay on pen/cursor)", async ({ page }) => {
     await openPdf(page);
     await page.locator('button[title^="Text"]').click();

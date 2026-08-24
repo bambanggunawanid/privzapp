@@ -13,7 +13,10 @@ use pages::{Home, Privacy, Support, ToolPage};
 
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 // Derived from app/brand/logo-master.png by scripts/gen-icons.py.
+// The nav shows the logo at 28px — ship the 56px cut there, not the 256px
+// favicon (Lighthouse: the full logo was 76 KB of the initial load).
 const LOGO: Asset = asset!("/assets/logo.png");
+const LOGO_NAV: Asset = asset!("/assets/logo-nav.png");
 
 #[derive(Debug, Clone, Routable, PartialEq)]
 #[rustfmt::skip]
@@ -79,7 +82,7 @@ fn Shell() -> Element {
     rsx! {
         header { class: "nav",
             Link { class: "brand", to: Route::Home {},
-                img { class: "brand-logo", src: LOGO, alt: "PrivZapp" }
+                img { class: "brand-logo", src: LOGO_NAV, alt: "PrivZapp" }
                 span { "PrivZapp" }
             }
             nav { class: "nav-links",

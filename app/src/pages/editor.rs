@@ -668,6 +668,13 @@ pub fn EditorPage() -> Element {
                 aside { class: "ed-left",
                     div { id: "pz-thumbs" }
                     if loaded {
+                        label {
+                            class: "ed-addpdf",
+                            r#for: "append-in",
+                            title: "Merge another PDF — its pages stack below the last page",
+                            span { class: "ed-addpdf-plus", "＋" }
+                            span { "Append PDF" }
+                        }
                         p { class: "ed-thumbhint", "Drag pages to reorder" }
                     }
                 }
@@ -711,6 +718,7 @@ pub fn EditorPage() -> Element {
                         div { class: "ed-row",
                             input {
                                 r#type: "color",
+                                aria_label: "Pen color",
                                 value: "{color}",
                                 oninput: move |evt| {
                                     color.set(evt.value());
@@ -719,6 +727,7 @@ pub fn EditorPage() -> Element {
                             }
                             input {
                                 r#type: "range",
+                                aria_label: "Pen size",
                                 min: "1",
                                 max: "16",
                                 value: "{size}",
@@ -736,6 +745,7 @@ pub fn EditorPage() -> Element {
                         div { class: "ed-row",
                             input {
                                 r#type: "color",
+                                aria_label: "Highlighter color",
                                 value: "{hl_color}",
                                 oninput: move |evt| {
                                     hl_color.set(evt.value());
@@ -744,6 +754,7 @@ pub fn EditorPage() -> Element {
                             }
                             input {
                                 r#type: "range",
+                                aria_label: "Highlighter size",
                                 min: "6",
                                 max: "32",
                                 value: "{hl_size}",
@@ -761,6 +772,7 @@ pub fn EditorPage() -> Element {
                         div { class: "ed-row",
                             input {
                                 r#type: "range",
+                                aria_label: "Text size",
                                 min: "8",
                                 max: "72",
                                 value: "{text_size}",
@@ -806,6 +818,7 @@ pub fn EditorPage() -> Element {
                             div { class: "ed-sec-body",
                                 input {
                                     r#type: "text",
+                                    aria_label: "Watermark text",
                                     placeholder: "CONFIDENTIAL",
                                     value: "{wm_text}",
                                     oninput: move |evt| wm_text.set(evt.value()),
@@ -829,6 +842,7 @@ pub fn EditorPage() -> Element {
                                     for (i , ph) in ["Left", "Top", "Right", "Bottom"].iter().enumerate() {
                                         input {
                                             r#type: "number",
+                                            aria_label: "{ph} margin (points)",
                                             placeholder: *ph,
                                             value: "{margin.read()[i]}",
                                             oninput: move |evt| margin.write()[i] = evt.value(),
@@ -850,7 +864,10 @@ pub fn EditorPage() -> Element {
                     }
 
                     div { class: "ed-sec",
-                        label { class: "ed-sec-h", r#for: "append-in",
+                        label {
+                            class: "ed-sec-h",
+                            r#for: "append-in",
+                            title: "Merge another PDF — its pages stack below the last page",
                             span { "➕ Append another PDF" }
                         }
                     }
@@ -873,6 +890,7 @@ pub fn EditorPage() -> Element {
                                 }
                                 input {
                                     r#type: "password",
+                                    aria_label: "Export password (optional)",
                                     placeholder: "•••••••• (optional)",
                                     value: "{export_pw}",
                                     oninput: move |evt| export_pw.set(evt.value()),

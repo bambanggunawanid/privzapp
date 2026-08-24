@@ -10,7 +10,9 @@ Outputs:
   app/pwa/icon-maskable-512.png   full-bleed (corners gradient-filled,
                                   mark safely inside the 80% zone)
   app/pwa/apple-touch-icon.png    180px full-bleed
-  app/assets/logo.png             256px rounded — favicon + in-app brand
+  app/pwa/splash-168.png          loading-splash logo (displayed at 84px)
+  app/assets/logo.png             256px rounded — favicon
+  app/assets/logo-nav.png         56px rounded — nav brand (displayed 28px)
 
 Stdlib only: a minimal PNG codec (8-bit RGB/RGBA, non-interlaced) plus a
 fractional box-average downscaler. Rerun after replacing the master:
@@ -91,12 +93,57 @@ def read_png(path):
     return w, h, px
 
 
+def filter_row(ft, line, prev, ch):
+    """Apply PNG filter `ft` to one raw scanline (encode direction)."""
+    n = len(line)
+    out = bytearray(n)
+    if ft == 0:
+        out[:] = line
+    elif ft == 1:  # Sub
+        for i in range(n):
+            a = line[i - ch] if i >= ch else 0
+            out[i] = (line[i] - a) & 0xFF
+    elif ft == 2:  # Up
+        for i in range(n):
+            out[i] = (line[i] - prev[i]) & 0xFF
+    elif ft == 3:  # Average
+        for i in range(n):
+            a = line[i - ch] if i >= ch else 0
+            out[i] = (line[i] - ((a + prev[i]) >> 1)) & 0xFF
+    else:  # Paeth
+        for i in range(n):
+            a = line[i - ch] if i >= ch else 0
+            b = prev[i]
+            c = prev[i - ch] if i >= ch else 0
+            p = a + b - c
+            pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+            pred = a if pa <= pb and pa <= pc else (b if pb <= pc else c)
+            out[i] = (line[i] - pred) & 0xFF
+    return out
+
+
 def write_png(path, w, h, rows):
     def chunk(tag, body):
         c = struct.pack(">I", len(body)) + tag + body
         return c + struct.pack(">I", zlib.crc32(tag + body) & 0xFFFFFFFF)
 
-    raw = b"".join(bytes([0]) + bytes(v for p in row for v in p) for row in rows)
+    # Adaptive per-row filtering (minimum-sum-of-absolutes heuristic, same
+    # as libpng): gradients Paeth/Sub-filter down to a fraction of the
+    # unfiltered size, losslessly.
+    raw = bytearray()
+    prev = bytes(w * 4)
+    for row in rows:
+        line = bytes(v for p in row for v in p)
+        best_ft, best = 0, None
+        for ft in range(5):
+            cand = filter_row(ft, line, prev, 4)
+            score = sum(b if b < 128 else 256 - b for b in cand)
+            if best is None or score < best_score:
+                best_ft, best, best_score = ft, cand, score
+        raw.append(best_ft)
+        raw += best
+        prev = line
+    raw = bytes(raw)
     png = (
         b"\x89PNG\r\n\x1a\n"
         + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
@@ -299,8 +346,10 @@ def main():
     print(f"master {w}x{h}, tile ({x0},{y0})-({x1},{y1}), corner r={r:.0f}px ({radius_frac:.2f})")
 
     pwa = ROOT / "app" / "pwa"
+    assets = ROOT / "app" / "assets"
     for size, path in [(512, pwa / "icon-512.png"), (192, pwa / "icon-192.png"),
-                       (256, ROOT / "app" / "assets" / "logo.png")]:
+                       (168, pwa / "splash-168.png"),
+                       (256, assets / "logo.png"), (56, assets / "logo-nav.png")]:
         rows = box_resize(px, x0, y0, x1 + 1, y1 + 1, size)
         write_png(path, size, size, round_corners(rows, radius_frac))
 

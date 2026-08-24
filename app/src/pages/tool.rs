@@ -377,6 +377,7 @@ pub fn ToolPage(slug: String) -> Element {
                                             "−"
                                         }
                                         input {
+                                            aria_label: "Quality",
                                             r#type: "range",
                                             min: "10",
                                             max: "100",
@@ -420,6 +421,7 @@ pub fn ToolPage(slug: String) -> Element {
                                             "−"
                                         }
                                         input {
+                                            aria_label: "Resolution percent",
                                             r#type: "range",
                                             min: "10",
                                             max: "100",
@@ -473,6 +475,7 @@ pub fn ToolPage(slug: String) -> Element {
                                 div { class: "opt",
                                     label { "Convert to" }
                                     select {
+                                        aria_label: "Convert to format",
                                         value: "{format}",
                                         onchange: move |evt| {
                                             format.set(evt.value());
@@ -499,6 +502,7 @@ pub fn ToolPage(slug: String) -> Element {
                                 div { class: "opt",
                                     label { "Rotate by" }
                                     select {
+                                        aria_label: "Rotate by",
                                         onchange: move |evt| {
                                             angle.set(evt.value().parse().unwrap_or(90));
                                             refresh_preview();
@@ -615,6 +619,7 @@ pub fn ToolPage(slug: String) -> Element {
                                 div { class: "opt",
                                     label { "Mirror direction" }
                                     select {
+                                        aria_label: "Mirror direction",
                                         onchange: move |evt| {
                                             format.set(evt.value());
                                             refresh_preview();
@@ -628,6 +633,7 @@ pub fn ToolPage(slug: String) -> Element {
                                 div { class: "opt",
                                     label { "Upscale factor" }
                                     select {
+                                        aria_label: "Upscale factor",
                                         onchange: move |evt| {
                                             scale.set(evt.value().parse().unwrap_or(2));
                                             refresh_preview();
@@ -641,6 +647,7 @@ pub fn ToolPage(slug: String) -> Element {
                                 div { class: "opt",
                                     label { "Strength: {quality}" }
                                     input {
+                                        aria_label: "Strength",
                                         r#type: "range",
                                         min: "1",
                                         max: "100",
