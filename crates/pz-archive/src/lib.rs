@@ -54,6 +54,8 @@ pub fn extract(bytes: &[u8]) -> Result<Vec<OutputFile>, PzError> {
         if entry.is_dir() {
             continue;
         }
+        // Fast reject on the declared sizes — but headers can lie, so the
+        // same ceilings are enforced again on the actual inflated bytes.
         if entry.size() > MAX_FILE_UNCOMPRESSED {
             return Err(PzError::Unsupported(format!(
                 "\"{}\" is larger than the in-browser limit ({} MB)",
@@ -61,17 +63,27 @@ pub fn extract(bytes: &[u8]) -> Result<Vec<OutputFile>, PzError> {
                 MAX_FILE_UNCOMPRESSED >> 20
             )));
         }
-        total = total.saturating_add(entry.size());
-        if total > MAX_TOTAL_UNCOMPRESSED {
+        if total.saturating_add(entry.size()) > MAX_TOTAL_UNCOMPRESSED {
             return Err(PzError::Unsupported(
                 "archive expands past the in-browser limit (1 GB)".into(),
             ));
         }
         let name = sanitize(entry.name());
-        let mut data = Vec::with_capacity(entry.size() as usize);
-        entry
+        let budget = MAX_FILE_UNCOMPRESSED.min(MAX_TOTAL_UNCOMPRESSED - total);
+        let declared = entry.size();
+        // Capacity from the declared size, capped: a lying header must not
+        // be able to force a huge allocation for a tiny entry.
+        let mut data = Vec::with_capacity(declared.min(1 << 20) as usize);
+        (&mut entry)
+            .take(budget + 1)
             .read_to_end(&mut data)
             .map_err(|e| PzError::Failed(format!("could not extract \"{name}\": {e}")))?;
+        if data.len() as u64 > budget || data.len() as u64 > declared {
+            return Err(PzError::Unsupported(format!(
+                "\"{name}\" inflates past its declared size — refusing (possible zip bomb)"
+            )));
+        }
+        total += data.len() as u64;
         outputs.push(OutputFile {
             name,
             mime: "application/octet-stream",
@@ -129,5 +141,27 @@ mod tests {
     #[test]
     fn rejects_empty_input() {
         assert!(create(&[]).is_err());
+    }
+
+    #[test]
+    fn rejects_lying_size_headers() {
+        let files = vec![("zeros.bin".to_string(), vec![0u8; 100_000])];
+        let mut archive = create(&files).unwrap();
+        // Understate the uncompressed size in the local file header
+        // (offset 22) and the central directory entry (offset 24): the
+        // declared-size checks pass, so the actual-bytes guard must fire.
+        let lie = 10u32.to_le_bytes();
+        let local = archive
+            .windows(4)
+            .position(|w| w == [0x50, 0x4b, 0x03, 0x04])
+            .unwrap();
+        archive[local + 22..local + 26].copy_from_slice(&lie);
+        let central = archive
+            .windows(4)
+            .position(|w| w == [0x50, 0x4b, 0x01, 0x02])
+            .unwrap();
+        archive[central + 24..central + 28].copy_from_slice(&lie);
+        let err = extract(&archive).unwrap_err();
+        assert!(format!("{err:?}").contains("declared size"), "{err:?}");
     }
 }

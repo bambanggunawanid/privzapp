@@ -42,10 +42,23 @@ fn ext_mime(fmt: ImageFormat) -> (&'static str, &'static str) {
     }
 }
 
+/// Decode/resize ceilings. Untrusted files can declare absurd dimensions
+/// (decompression bombs) and a browser tab only has ~2-4 GB; reject early
+/// with a clear message instead of aborting the wasm instance mid-alloc.
+const MAX_DIM: u32 = 20_000;
+const MAX_PIXELS: u64 = 64_000_000; // ~16k x 4k output
+
 fn decode(bytes: &[u8]) -> Result<(DynamicImage, ImageFormat), PzError> {
     let fmt = image::guess_format(bytes)
         .map_err(|_| PzError::Unsupported("could not detect image format".into()))?;
-    let img = image::load_from_memory(bytes)
+    let mut reader = image::ImageReader::new(Cursor::new(bytes));
+    reader.set_format(fmt);
+    let mut limits = image::Limits::default(); // keeps the 512 MiB alloc cap
+    limits.max_image_width = Some(MAX_DIM);
+    limits.max_image_height = Some(MAX_DIM);
+    reader.limits(limits);
+    let img = reader
+        .decode()
         .map_err(|e| PzError::Failed(format!("could not decode image: {e}")))?;
     Ok((img, fmt))
 }
@@ -169,15 +182,25 @@ pub fn resize(
     }
     let (img, fmt) = decode(bytes)?;
     let (w0, h0) = (img.width(), img.height());
-    let resized = if width > 0 && height > 0 {
-        img.resize_exact(width, height, FilterType::Lanczos3)
+    let (tw, th) = if width > 0 && height > 0 {
+        (width, height)
     } else if width > 0 {
-        let h = ((height_ratio(w0, h0) * width as f64).round() as u32).max(1);
-        img.resize_exact(width, h, FilterType::Lanczos3)
+        (
+            width,
+            ((height_ratio(w0, h0) * width as f64).round() as u32).max(1),
+        )
     } else {
-        let w = ((width_ratio(w0, h0) * height as f64).round() as u32).max(1);
-        img.resize_exact(w, height, FilterType::Lanczos3)
+        (
+            ((width_ratio(w0, h0) * height as f64).round() as u32).max(1),
+            height,
+        )
     };
+    if tw as u64 * th as u64 > MAX_PIXELS {
+        return Err(PzError::Invalid(format!(
+            "{tw}x{th} is too large to process in memory"
+        )));
+    }
+    let resized = img.resize_exact(tw, th, FilterType::Lanczos3);
     let out = encode(&resized, fmt, quality)?;
     let (ext, mime) = ext_mime(fmt);
     Ok(OutputFile {
@@ -303,7 +326,6 @@ pub fn upscale(name: &str, bytes: &[u8], factor: u32, quality: u8) -> Result<Out
     }
     let (img, fmt) = decode(bytes)?;
     let (w, h) = (img.width() * factor, img.height() * factor);
-    const MAX_PIXELS: u64 = 64_000_000; // ~16k x 4k — keep wasm memory sane
     if w as u64 * h as u64 > MAX_PIXELS {
         return Err(PzError::Invalid(format!(
             "result would be {w}x{h} — too large to process in memory"
@@ -718,5 +740,57 @@ mod tests {
         let after = image::load_from_memory(&out.bytes).unwrap().to_rgba8();
         assert!(before.pixels().zip(after.pixels()).any(|(a, b)| a != b));
         assert!(watermark_text("p.png", &src, "  ", 80).is_err());
+    }
+
+    /// Structurally valid PNG whose header declares `w`x`h` — a
+    /// decompression-bomb probe (no real pixel data needed: dimension
+    /// limits must trip before any is read).
+    fn png_with_dims(w: u32, h: u32) -> Vec<u8> {
+        fn crc32(data: &[u8]) -> u32 {
+            let mut crc = 0xFFFF_FFFFu32;
+            for &b in data {
+                crc ^= b as u32;
+                for _ in 0..8 {
+                    crc = if crc & 1 != 0 {
+                        (crc >> 1) ^ 0xEDB8_8320
+                    } else {
+                        crc >> 1
+                    };
+                }
+            }
+            !crc
+        }
+        let mut ihdr = Vec::new();
+        ihdr.extend(w.to_be_bytes());
+        ihdr.extend(h.to_be_bytes());
+        ihdr.extend([8, 6, 0, 0, 0]); // 8-bit RGBA
+        let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
+        for (tag, body) in [
+            (b"IHDR", ihdr.as_slice()),
+            (b"IDAT", &[][..]),
+            (b"IEND", &[][..]),
+        ] {
+            out.extend((body.len() as u32).to_be_bytes());
+            out.extend(tag);
+            out.extend(body);
+            let mut crc_input = tag.to_vec();
+            crc_input.extend(body);
+            out.extend(crc32(&crc_input).to_be_bytes());
+        }
+        out
+    }
+
+    #[test]
+    fn rejects_decompression_bomb_dimensions() {
+        // 25k x 25k RGBA would be 2.5 GB decoded — must fail at the header.
+        let bomb = png_with_dims(25_000, 25_000);
+        let err = compress("bomb.png", &bomb, 80, 100).unwrap_err();
+        assert!(format!("{err:?}").contains("could not decode"), "{err:?}");
+    }
+
+    #[test]
+    fn resize_rejects_absurd_targets() {
+        let err = resize("p.png", &sample_png(), 50_000, 50_000, 80).unwrap_err();
+        assert!(format!("{err:?}").contains("too large"), "{err:?}");
     }
 }
