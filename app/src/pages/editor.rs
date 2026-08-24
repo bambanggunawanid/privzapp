@@ -1,8 +1,10 @@
 //! The PDF editor workspace: a working document that tools operate on,
-//! Adobe/iLove style — draw or sign, stamp images, then rotate, number,
-//! watermark, crop, reorder or append, each applying to the working copy
-//! and returning to the editor. Export bakes everything and downloads
-//! (optionally compressed or password-protected).
+//! design-tool style — a Figma-like shell with page thumbnails on the
+//! left, a zoomable canvas in the middle and a properties inspector on
+//! the right. Draw or sign, stamp images, place text, then rotate,
+//! number, watermark, crop, reorder or append; every operation applies
+//! to the working copy and returns to the editor. Export bakes
+//! everything and downloads (optionally compressed or password-protected).
 //!
 //! Rendering is PDF.js (bundled locally, ADR-0007); all mutation is the
 //! Rust engine. Pending ink/stamps are auto-baked before any document
@@ -137,7 +139,7 @@ async fn pending_edits(attachments: &[(String, Vec<u8>)]) -> Result<Vec<PageEdit
         .collect())
 }
 
-/// A document-level operation from the toolbar.
+/// A document-level operation from the inspector.
 #[derive(Clone)]
 enum Op {
     Rotate(i32),
@@ -168,9 +170,13 @@ pub fn EditorPage() -> Element {
     let mut busy = use_signal(|| false);
     let mut error = use_signal(String::new);
     let mut notice = use_signal(String::new);
-    // Which tool panel is open ("" = none).
+    // Active canvas tool, mirrored to JS ("pen" | "pan").
+    let mut tool = use_signal(|| "pen");
+    // Which inspector section is expanded ("" = none).
     let mut panel = use_signal(|| "");
-    // Panel inputs.
+    // Inspector on small screens (CSS shows it statically on wide ones).
+    let mut inspector_open = use_signal(|| false);
+    // Section inputs.
     let mut add_text = use_signal(String::new);
     let mut text_size = use_signal(|| 18u8);
     let mut wm_text = use_signal(String::new);
@@ -185,10 +191,17 @@ pub fn EditorPage() -> Element {
     });
     let mut export_pw = use_signal(String::new);
 
-    let set_tool = move |mode: &'static str| {
+    let mut set_tool = move |mode: &'static str| {
+        tool.set(mode);
         let js = format!("pzSetTool('{mode}', '{}', {});", color(), size());
         spawn(async move {
             let _ = eval(&js).await;
+        });
+    };
+
+    let zoom = move |action: &'static str| {
+        spawn(async move {
+            let _ = eval(&format!("return pzZoom('{action}');")).await;
         });
     };
 
@@ -371,15 +384,24 @@ pub fn EditorPage() -> Element {
         });
     };
 
-    let chip = move |id: &'static str, label: &'static str| {
+    // Inspector accordion header.
+    let sec = move |id: &'static str, label: &'static str| {
         rsx! {
             button {
-                class: if panel() == id { "related-link chip-active" } else { "related-link" },
+                class: if panel() == id { "ed-sec-h open" } else { "ed-sec-h" },
                 onclick: move |_| panel.set(if panel() == id { "" } else { id }),
-                {label}
+                span { {label} }
+                span { class: "ed-caret", {if panel() == id { "▾" } else { "▸" }} }
             }
         }
     };
+
+    let doc_name = pdf
+        .read()
+        .as_ref()
+        .map(|(n, _)| n.clone())
+        .unwrap_or_else(|| "Edit PDF".to_string());
+    let loaded = pdf.read().is_some();
 
     rsx! {
         document::Script { src: EDITOR_JS }
@@ -388,322 +410,402 @@ pub fn EditorPage() -> Element {
             document::Meta { name: "description", content: seo.description }
         }
 
-        section { class: "tool-head",
-            div { class: "tool-icon big", "✏️" }
-            div {
-                h1 { "Edit PDF" }
-                p { class: "muted",
-                    "Sign, draw, stamp — then rotate, number, watermark, crop, "
-                    "reorganize or append, all on your device."
-                }
-            }
-        }
-
-        if pdf.read().is_none() {
-            section { class: "panel",
-                label { class: "dropzone", r#for: "pdf-in",
-                    span { class: "dz-icon", "⬆" }
-                    span { class: "dz-label", "Choose a PDF to edit" }
-                    span { class: "dz-hint", "Files stay on this device — always." }
-                }
-                input {
-                    id: "pdf-in",
-                    class: "file-input",
-                    r#type: "file",
-                    accept: ".pdf",
-                    onchange: move |evt| {
-                        spawn(async move {
-                            error.set(String::new());
-                            busy.set(true);
-                            if let Some(f) = evt.files().into_iter().next() {
-                                match f.read_bytes().await {
-                                    Ok(bytes) => match open_in_js(&bytes).await {
-                                        Ok(pages) => {
-                                            num_pages.set(pages);
-                                            history.set(Vec::new());
-                                            pdf.set(Some((f.name(), bytes.to_vec())));
-                                        }
-                                        Err(e) => error.set(e),
-                                    },
-                                    Err(e) => error.set(format!("could not read file: {e}")),
-                                }
-                            }
-                            busy.set(false);
-                        });
-                    },
-                }
-                if busy() {
-                    p { class: "muted", "Rendering pages…" }
-                }
-                if !error.read().is_empty() {
-                    p { class: "error", "{error}" }
-                }
-            }
-        } else {
-            section { class: "panel editor-toolbar",
-                div { class: "editor-controls",
-                    span { class: "muted small", "{num_pages} page(s)" }
-                    button { class: "ghost", onclick: move |_| set_tool("pen"), "✒ Pen" }
-                    label { class: "muted small", "Color"
-                        input {
-                            r#type: "color",
-                            value: "{color}",
-                            oninput: move |evt| {
-                                color.set(evt.value());
-                                set_tool("pen");
-                            },
-                        }
+        div { class: if loaded { "ed-shell" } else { "ed-shell empty" },
+            // ---- top bar ----
+            div { class: "ed-top",
+                div { class: "ed-title",
+                    span { class: "ed-docname", "{doc_name}" }
+                    if loaded {
+                        span { class: "muted small", "{num_pages} page(s)" }
                     }
-                    label { class: "muted small", "Size {size}"
-                        input {
-                            r#type: "range",
-                            min: "1",
-                            max: "16",
-                            value: "{size}",
-                            oninput: move |evt| {
-                                size.set(evt.value().parse().unwrap_or(3));
-                                set_tool("pen");
-                            },
-                        }
+                }
+                div { class: "ed-modes",
+                    button {
+                        class: if tool() == "pan" { "ed-mode active" } else { "ed-mode" },
+                        title: "Hand — drag to pan (or hold Ctrl + scroll to zoom)",
+                        onclick: move |_| set_tool("pan"),
+                        "✋"
                     }
                     button {
-                        class: "ghost",
-                        title: "Undo last stroke or stamp",
+                        class: if tool() == "pen" { "ed-mode active" } else { "ed-mode" },
+                        title: "Pen — draw or sign by hand",
+                        onclick: move |_| set_tool("pen"),
+                        "✒"
+                    }
+                    button {
+                        class: if panel() == "text" { "ed-mode active" } else { "ed-mode" },
+                        title: "Text — type, then tap the page to place",
+                        onclick: move |_| {
+                            panel.set(if panel() == "text" { "" } else { "text" });
+                            inspector_open.set(true);
+                        },
+                        "🅰"
+                    }
+                    label { class: "ed-mode", r#for: "img-in", title: "Image — drag a rectangle to stamp", "🖼" }
+                }
+                div { class: "ed-actions",
+                    button {
+                        class: "ed-icon",
+                        title: "Undo last stroke, text or stamp",
                         onclick: move |_| {
                             spawn(async move {
                                 let _ = eval("pzUndo();").await;
                             });
                         },
-                        "↶ Stroke"
+                        "↶"
                     }
                     button {
-                        class: "ghost",
+                        class: "ed-icon",
                         title: "Undo last document operation",
                         onclick: undo_op,
-                        "⎌ Operation"
+                        "⎌"
+                    }
+                    button {
+                        class: "ed-icon ed-insp-toggle",
+                        title: "Toggle inspector",
+                        onclick: move |_| inspector_open.set(!inspector_open()),
+                        "🎛"
+                    }
+                    button {
+                        class: "primary small-btn",
+                        disabled: !loaded,
+                        onclick: move |_| {
+                            panel.set("export");
+                            inspector_open.set(true);
+                        },
+                        "Export ↓"
+                    }
+                }
+            }
+            if busy() {
+                div { class: "ed-busybar" }
+            }
+
+            div { class: "ed-main",
+                // ---- page thumbnails ----
+                aside { class: "ed-left",
+                    div { id: "pz-thumbs" }
+                }
+
+                // ---- canvas ----
+                div { class: "ed-canvas-wrap",
+                    div { class: "ed-canvas",
+                        div { id: "pz-pages" }
+                        if !loaded {
+                            div { class: "ed-drop",
+                                div { class: "panel ed-drop-card",
+                                    label { class: "dropzone", r#for: "pdf-in",
+                                        span { class: "dz-icon", "⬆" }
+                                        span { class: "dz-label", "Choose a PDF to edit" }
+                                        span { class: "dz-hint", "Files stay on this device — always." }
+                                    }
+                                    if busy() {
+                                        p { class: "muted", "Rendering pages…" }
+                                    }
+                                    if !error.read().is_empty() {
+                                        p { class: "error", "{error}" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if loaded {
+                        div { class: "ed-float ed-pageind",
+                            span { id: "pz-pageno", "–" }
+                        }
+                        div { class: "ed-float ed-zoom",
+                            button { class: "ed-icon", title: "Zoom out", onclick: move |_| zoom("out"), "−" }
+                            span { id: "pz-zoomlvl", class: "ed-zoomlvl", "100%" }
+                            button { class: "ed-icon", title: "Zoom in", onclick: move |_| zoom("in"), "+" }
+                            button { class: "ed-icon", title: "Fit width", onclick: move |_| zoom("fit"), "⤢" }
+                        }
                     }
                 }
 
-                div { class: "editor-controls chip-row",
-                    label { class: "related-link", r#for: "img-in", "🖼 Image" }
-                    input {
-                        id: "img-in",
-                        class: "file-input",
-                        r#type: "file",
-                        accept: "image/*",
-                        onchange: move |evt| {
-                            spawn(async move {
-                                if let Some(f) = evt.files().into_iter().next() {
-                                    if let Ok(bytes) = f.read_bytes().await {
-                                        let id = format!("img{}", attachments.read().len());
-                                        let stage_call = bytes_to_js_call(
-                                            "pzStageImage",
-                                            &format!("'{id}', "),
-                                            &bytes,
-                                            "application/octet-stream",
+                // ---- inspector ----
+                aside { class: if inspector_open() { "ed-right open" } else { "ed-right" },
+                    div { class: "ed-sec",
+                        span { class: "ed-sec-title", "Pen" }
+                        div { class: "ed-row",
+                            input {
+                                r#type: "color",
+                                value: "{color}",
+                                oninput: move |evt| {
+                                    color.set(evt.value());
+                                    set_tool("pen");
+                                },
+                            }
+                            input {
+                                r#type: "range",
+                                min: "1",
+                                max: "16",
+                                value: "{size}",
+                                oninput: move |evt| {
+                                    size.set(evt.value().parse().unwrap_or(3));
+                                    set_tool("pen");
+                                },
+                            }
+                            span { class: "muted small", "{size}px" }
+                        }
+                    }
+
+                    div { class: "ed-sec",
+                        {sec("text", "🅰 Add text")}
+                        if panel() == "text" {
+                            div { class: "ed-sec-body",
+                                textarea {
+                                    rows: "3",
+                                    placeholder: "Type your text — Enter for a new line",
+                                    value: "{add_text}",
+                                    oninput: move |evt| add_text.set(evt.value()),
+                                }
+                                div { class: "ed-row",
+                                    input {
+                                        r#type: "range",
+                                        min: "8",
+                                        max: "72",
+                                        value: "{text_size}",
+                                        oninput: move |evt| text_size.set(evt.value().parse().unwrap_or(18)),
+                                    }
+                                    span { class: "muted small", "{text_size}pt" }
+                                }
+                                button {
+                                    class: "primary small-btn",
+                                    disabled: busy() || add_text.read().trim().is_empty(),
+                                    onclick: move |_| {
+                                        // serde_json produces a safely-escaped JS string literal.
+                                        let text_js = serde_json::to_string(&add_text()).unwrap_or_default();
+                                        let js = format!(
+                                            "pzStageText({text_js}, '{}', {});",
+                                            color(),
+                                            text_size()
                                         );
-                                        let js = format!("return (async () => {{ return {stage_call}; }})();");
-                                        match eval(&js).await {
-                                            Ok(_) => {
-                                                attachments.write().push((id, bytes.to_vec()));
-                                                notice.set("Drag a rectangle on a page to place the image.".into());
-                                            }
-                                            Err(e) => error.set(format!("could not load image: {e:?}")),
+                                        spawn(async move {
+                                            let _ = eval(&js).await;
+                                            notice.set("Tap on a page where the text should go.".into());
+                                        });
+                                    },
+                                    "Place text"
+                                }
+                                span { class: "muted small", "Uses the pen color. Latin characters only." }
+                            }
+                        }
+                    }
+
+                    div { class: "ed-sec",
+                        {sec("rotate", "🔄 Rotate pages")}
+                        if panel() == "rotate" {
+                            div { class: "ed-sec-body ed-row",
+                                button { class: "ghost", disabled: busy(), onclick: move |_| apply_op(Op::Rotate(90)), "90° ↻" }
+                                button { class: "ghost", disabled: busy(), onclick: move |_| apply_op(Op::Rotate(180)), "180°" }
+                                button { class: "ghost", disabled: busy(), onclick: move |_| apply_op(Op::Rotate(270)), "90° ↺" }
+                            }
+                        }
+                    }
+
+                    div { class: "ed-sec",
+                        button {
+                            class: "ed-sec-h",
+                            disabled: busy(),
+                            onclick: move |_| apply_op(Op::PageNumbers),
+                            span { "🔢 Add page numbers" }
+                        }
+                    }
+
+                    div { class: "ed-sec",
+                        {sec("watermark", "💧 Watermark")}
+                        if panel() == "watermark" {
+                            div { class: "ed-sec-body",
+                                input {
+                                    r#type: "text",
+                                    placeholder: "CONFIDENTIAL",
+                                    value: "{wm_text}",
+                                    oninput: move |evt| wm_text.set(evt.value()),
+                                }
+                                button {
+                                    class: "primary small-btn",
+                                    disabled: busy(),
+                                    onclick: move |_| apply_op(Op::Watermark(wm_text())),
+                                    "Stamp"
+                                }
+                            }
+                        }
+                    }
+
+                    div { class: "ed-sec",
+                        {sec("crop", "✂ Crop margins")}
+                        if panel() == "crop" {
+                            div { class: "ed-sec-body",
+                                span { class: "muted small", "Trim (PDF points, 72 = 1\")" }
+                                div { class: "ed-grid2",
+                                    for (i , ph) in ["Left", "Top", "Right", "Bottom"].iter().enumerate() {
+                                        input {
+                                            r#type: "number",
+                                            placeholder: *ph,
+                                            value: "{margin.read()[i]}",
+                                            oninput: move |evt| margin.write()[i] = evt.value(),
                                         }
                                     }
                                 }
-                            });
-                        },
-                    }
-                    {chip("text", "🅰 Text")}
-                    {chip("rotate", "🔄 Rotate")}
-                    button {
-                        class: "related-link",
-                        disabled: busy(),
-                        onclick: move |_| apply_op(Op::PageNumbers),
-                        "🔢 Page numbers"
-                    }
-                    {chip("watermark", "💧 Watermark")}
-                    {chip("crop", "✂ Crop")}
-                    {chip("organize", "🔀 Organize")}
-                    label { class: "related-link", r#for: "append-in", "➕ Append PDF" }
-                    input {
-                        id: "append-in",
-                        class: "file-input",
-                        r#type: "file",
-                        accept: ".pdf",
-                        onchange: move |evt| {
-                            spawn(async move {
-                                if let Some(f) = evt.files().into_iter().next() {
-                                    if let Ok(bytes) = f.read_bytes().await {
-                                        apply_op(Op::Append(bytes.to_vec()));
-                                    }
+                                button {
+                                    class: "primary small-btn",
+                                    disabled: busy(),
+                                    onclick: move |_| {
+                                        let m = margin.read();
+                                        let p = |i: usize| m[i].trim().parse().unwrap_or(0u32);
+                                        apply_op(Op::Crop(p(0), p(1), p(2), p(3)));
+                                    },
+                                    "Crop"
                                 }
-                            });
-                        },
+                            }
+                        }
                     }
-                    {chip("export", "⬇ Export")}
-                }
 
-                match panel() {
-                    "text" => rsx! {
-                        div { class: "tool-panel",
-                            textarea {
-                                rows: "2",
-                                placeholder: "Type your text — Enter for a new line",
-                                value: "{add_text}",
-                                oninput: move |evt| add_text.set(evt.value()),
-                            }
-                            label { class: "muted small", "Size {text_size}"
+                    div { class: "ed-sec",
+                        {sec("organize", "🔀 Organize pages")}
+                        if panel() == "organize" {
+                            div { class: "ed-sec-body",
+                                span { class: "muted small",
+                                    "New order — repeat to duplicate, omit to delete:"
+                                }
                                 input {
-                                    r#type: "range",
-                                    min: "8",
-                                    max: "72",
-                                    value: "{text_size}",
-                                    oninput: move |evt| text_size.set(evt.value().parse().unwrap_or(18)),
+                                    r#type: "text",
+                                    placeholder: "3,1,2",
+                                    value: "{order_spec}",
+                                    oninput: move |evt| order_spec.set(evt.value()),
+                                }
+                                button {
+                                    class: "primary small-btn",
+                                    disabled: busy(),
+                                    onclick: move |_| apply_op(Op::Organize(order_spec())),
+                                    "Apply order"
                                 }
                             }
-                            button {
-                                class: "primary small-btn",
-                                disabled: busy() || add_text.read().trim().is_empty(),
-                                onclick: move |_| {
-                                    // serde_json produces a safely-escaped JS string literal.
-                                    let text_js = serde_json::to_string(&add_text()).unwrap_or_default();
-                                    let js = format!(
-                                        "pzStageText({text_js}, '{}', {});",
-                                        color(),
-                                        text_size()
-                                    );
-                                    spawn(async move {
-                                        let _ = eval(&js).await;
-                                        notice.set("Tap on a page where the text should go.".into());
-                                        panel.set("");
-                                    });
-                                },
-                                "Place text"
-                            }
-                            span { class: "muted small", "Uses the pen color. Latin characters only." }
                         }
-                    },
-                    "rotate" => rsx! {
-                        div { class: "tool-panel",
-                            span { class: "muted small", "Rotate every page:" }
-                            button { class: "ghost", disabled: busy(), onclick: move |_| apply_op(Op::Rotate(90)), "90° ↻" }
-                            button { class: "ghost", disabled: busy(), onclick: move |_| apply_op(Op::Rotate(180)), "180°" }
-                            button { class: "ghost", disabled: busy(), onclick: move |_| apply_op(Op::Rotate(270)), "90° ↺" }
-                        }
-                    },
-                    "watermark" => rsx! {
-                        div { class: "tool-panel",
-                            input {
-                                r#type: "text",
-                                placeholder: "CONFIDENTIAL",
-                                value: "{wm_text}",
-                                oninput: move |evt| wm_text.set(evt.value()),
-                            }
-                            button {
-                                class: "primary small-btn",
-                                disabled: busy(),
-                                onclick: move |_| apply_op(Op::Watermark(wm_text())),
-                                "Stamp"
-                            }
-                        }
-                    },
-                    "crop" => rsx! {
-                        div { class: "tool-panel",
-                            span { class: "muted small", "Trim margins (points, 72 = 1\")" }
-                            for (i , ph) in ["Left", "Top", "Right", "Bottom"].iter().enumerate() {
-                                input {
-                                    r#type: "number",
-                                    placeholder: *ph,
-                                    value: "{margin.read()[i]}",
-                                    oninput: move |evt| margin.write()[i] = evt.value(),
-                                }
-                            }
-                            button {
-                                class: "primary small-btn",
-                                disabled: busy(),
-                                onclick: move |_| {
-                                    let m = margin.read();
-                                    let p = |i: usize| m[i].trim().parse().unwrap_or(0u32);
-                                    apply_op(Op::Crop(p(0), p(1), p(2), p(3)));
-                                },
-                                "Crop"
-                            }
-                        }
-                    },
-                    "organize" => rsx! {
-                        div { class: "tool-panel",
-                            span { class: "muted small",
-                                "New page order — repeat to duplicate, omit to delete:"
-                            }
-                            input {
-                                r#type: "text",
-                                placeholder: "3,1,2",
-                                value: "{order_spec}",
-                                oninput: move |evt| order_spec.set(evt.value()),
-                            }
-                            button {
-                                class: "primary small-btn",
-                                disabled: busy(),
-                                onclick: move |_| apply_op(Op::Organize(order_spec())),
-                                "Apply order"
-                            }
-                        }
-                    },
-                    "export" => rsx! {
-                        div { class: "tool-panel",
-                            button {
-                                class: "primary small-btn",
-                                disabled: busy(),
-                                onclick: move |_| apply_op(Op::Export(ExportKind::Plain)),
-                                "⬇ Download"
-                            }
-                            button {
-                                class: "ghost",
-                                disabled: busy(),
-                                onclick: move |_| apply_op(Op::Export(ExportKind::Compressed)),
-                                "⬇ Compressed"
-                            }
-                            input {
-                                r#type: "password",
-                                placeholder: "•••••••• (optional)",
-                                value: "{export_pw}",
-                                oninput: move |evt| export_pw.set(evt.value()),
-                            }
-                            button {
-                                class: "ghost",
-                                disabled: busy() || export_pw.read().is_empty(),
-                                onclick: move |_| apply_op(Op::Export(ExportKind::Protected(export_pw()))),
-                                "⬇ Protected (AES-256)"
-                            }
-                        }
-                    },
-                    _ => rsx! {},
-                }
+                    }
 
-                if busy() {
-                    p { class: "muted small", "Working…" }
-                }
-                if !error.read().is_empty() {
-                    p { class: "error", "{error}" }
-                }
-                if !notice.read().is_empty() {
-                    p { class: "notice", "{notice}" }
+                    div { class: "ed-sec",
+                        label { class: "ed-sec-h", r#for: "append-in",
+                            span { "➕ Append another PDF" }
+                        }
+                    }
+
+                    div { class: "ed-sec",
+                        {sec("export", "⬇ Export")}
+                        if panel() == "export" {
+                            div { class: "ed-sec-body",
+                                button {
+                                    class: "primary small-btn",
+                                    disabled: busy(),
+                                    onclick: move |_| apply_op(Op::Export(ExportKind::Plain)),
+                                    "⬇ Download PDF"
+                                }
+                                button {
+                                    class: "ghost",
+                                    disabled: busy(),
+                                    onclick: move |_| apply_op(Op::Export(ExportKind::Compressed)),
+                                    "⬇ Compressed"
+                                }
+                                input {
+                                    r#type: "password",
+                                    placeholder: "•••••••• (optional)",
+                                    value: "{export_pw}",
+                                    oninput: move |evt| export_pw.set(evt.value()),
+                                }
+                                button {
+                                    class: "ghost",
+                                    disabled: busy() || export_pw.read().is_empty(),
+                                    onclick: move |_| apply_op(Op::Export(ExportKind::Protected(export_pw()))),
+                                    "⬇ Protected (AES-256)"
+                                }
+                            }
+                        }
+                    }
+
+                    if !error.read().is_empty() {
+                        p { class: "error", "{error}" }
+                    }
+                    if !notice.read().is_empty() {
+                        p { class: "notice", "{notice}" }
+                    }
+                    p { class: "muted small ed-privacy",
+                        "Rendered and edited entirely on this device — the file, your "
+                        "signature and everything you draw never leave it."
+                    }
                 }
             }
         }
 
-        // PDF.js + the overlay system render into this container; Dioxus
-        // declares no children here so it never touches them.
-        div { id: "pz-pages" }
-
-        section { class: "panel tool-info",
-            p { class: "muted",
-                "The PDF is rendered and edited entirely in your browser — the file, "
-                "your signature and everything you draw never leave this device. "
-                "Drawings are baked in automatically before any document operation."
-            }
+        // Hidden file inputs (triggered by the labels above).
+        input {
+            id: "pdf-in",
+            class: "file-input",
+            r#type: "file",
+            accept: ".pdf",
+            onchange: move |evt| {
+                spawn(async move {
+                    error.set(String::new());
+                    busy.set(true);
+                    if let Some(f) = evt.files().into_iter().next() {
+                        match f.read_bytes().await {
+                            Ok(bytes) => match open_in_js(&bytes).await {
+                                Ok(pages) => {
+                                    num_pages.set(pages);
+                                    history.set(Vec::new());
+                                    pdf.set(Some((f.name(), bytes.to_vec())));
+                                }
+                                Err(e) => error.set(e),
+                            },
+                            Err(e) => error.set(format!("could not read file: {e}")),
+                        }
+                    }
+                    busy.set(false);
+                });
+            },
+        }
+        input {
+            id: "img-in",
+            class: "file-input",
+            r#type: "file",
+            accept: "image/*",
+            onchange: move |evt| {
+                spawn(async move {
+                    if let Some(f) = evt.files().into_iter().next() {
+                        if let Ok(bytes) = f.read_bytes().await {
+                            let id = format!("img{}", attachments.read().len());
+                            let stage_call = bytes_to_js_call(
+                                "pzStageImage",
+                                &format!("'{id}', "),
+                                &bytes,
+                                "application/octet-stream",
+                            );
+                            let js = format!("return (async () => {{ return {stage_call}; }})();");
+                            match eval(&js).await {
+                                Ok(_) => {
+                                    attachments.write().push((id, bytes.to_vec()));
+                                    notice.set("Drag a rectangle on a page to place the image.".into());
+                                }
+                                Err(e) => error.set(format!("could not load image: {e:?}")),
+                            }
+                        }
+                    }
+                });
+            },
+        }
+        input {
+            id: "append-in",
+            class: "file-input",
+            r#type: "file",
+            accept: ".pdf",
+            onchange: move |evt| {
+                spawn(async move {
+                    if let Some(f) = evt.files().into_iter().next() {
+                        if let Ok(bytes) = f.read_bytes().await {
+                            apply_op(Op::Append(bytes.to_vec()));
+                        }
+                    }
+                });
+            },
         }
     }
 }

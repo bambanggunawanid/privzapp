@@ -4,11 +4,16 @@
 // network) and the per-page drawing overlays. The Rust side calls the pz*
 // functions via dioxus eval and receives the final annotations from
 // pzExport() in PDF coordinates, ready for the engine to bake in.
+//
+// Workspace extras (thumbnails, zoom, pan) live here too: they are pure
+// presentation. Zoom re-renders pages at the new scale and rescales the
+// stored overlay-pixel annotations by the same ratio, so pzExport()'s
+// scale-relative math never changes.
 
 window.pzEd = {
   lib: null,
   doc: null,
-  pages: [], // 1-based: {overlay, ctx, scale, pdfW, pdfH}
+  pages: [], // 1-based: {wrap, canvas, overlay, ctx, scale, fitScale, pdfW, pdfH}
   tool: { mode: "pen", color: "#1130cc", size: 3 },
   strokes: {}, // page -> [{color,size,points:[[x,y],…]}] in overlay px
   images: {}, // page -> [{id,x,y,w,h}] in overlay px
@@ -17,6 +22,8 @@ window.pzEd = {
   staged: null, // image id waiting for placement
   stagedText: null, // {text,color,size} waiting for a tap
   history: [], // [{type:'stroke'|'image'|'text', page}]
+  zoom: 1, // 1 = fit-width; survives re-opens so operations keep your view
+  zooming: false,
 };
 
 async function pzInit(pdfjsUrl, workerUrl) {
@@ -58,11 +65,14 @@ async function pzOpenParams(params) {
   E.stagedText = null;
   const container = document.getElementById("pz-pages");
   container.innerHTML = "";
-  const maxW = Math.min(container.clientWidth || 800, 860);
+  const thumbs = document.getElementById("pz-thumbs");
+  if (thumbs) thumbs.innerHTML = "";
+  const maxW = Math.min((container.clientWidth || 848) - 48, 1100);
   for (let n = 1; n <= E.doc.numPages; n++) {
     const page = await E.doc.getPage(n);
     const base = page.getViewport({ scale: 1 });
-    const scale = maxW / base.width;
+    const fitScale = maxW / base.width;
+    const scale = fitScale * E.zoom;
     const vp = page.getViewport({ scale });
     const wrap = document.createElement("div");
     wrap.className = "pz-page";
@@ -75,21 +85,166 @@ async function pzOpenParams(params) {
     overlay.width = vp.width;
     overlay.height = vp.height;
     overlay.className = "pz-overlay";
+    if (E.tool.mode === "pan") overlay.style.pointerEvents = "none";
     wrap.appendChild(canvas);
     wrap.appendChild(overlay);
     container.appendChild(wrap);
     await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp })
       .promise;
     E.pages[n] = {
+      wrap,
+      canvas,
       overlay,
       ctx: overlay.getContext("2d"),
       scale,
+      fitScale,
       pdfW: base.width,
       pdfH: base.height,
     };
     pzHook(overlay, n);
+    if (thumbs) await pzThumb(thumbs, page, base, n, wrap);
   }
+  pzBindScroller(container);
+  pzIndicate(1, E.doc.numPages);
+  const z = document.getElementById("pz-zoomlvl");
+  if (z) z.textContent = Math.round(E.zoom * 100) + "%";
   return E.doc.numPages;
+}
+
+async function pzThumb(thumbs, page, base, n, wrap) {
+  const tscale = 96 / base.width;
+  const tvp = page.getViewport({ scale: tscale });
+  const tc = document.createElement("canvas");
+  tc.width = tvp.width;
+  tc.height = tvp.height;
+  const item = document.createElement("div");
+  item.className = n === 1 ? "pz-thumb active" : "pz-thumb";
+  item.dataset.page = n;
+  const num = document.createElement("span");
+  num.textContent = n;
+  item.appendChild(tc);
+  item.appendChild(num);
+  item.onclick = () => wrap.scrollIntoView({ behavior: "smooth", block: "start" });
+  thumbs.appendChild(item);
+  await page.render({ canvasContext: tc.getContext("2d"), viewport: tvp })
+    .promise;
+}
+
+// Pan-drag, ctrl+wheel zoom and the current-page tracker, bound once on
+// the workspace scroll container (the parent of #pz-pages).
+function pzBindScroller(container) {
+  const sc = container.parentElement;
+  if (!sc || sc.dataset.pzBound) return;
+  sc.dataset.pzBound = "1";
+
+  let drag = null;
+  sc.addEventListener("pointerdown", (ev) => {
+    if (window.pzEd.tool.mode !== "pan") return;
+    drag = { x: ev.clientX, y: ev.clientY, sx: sc.scrollLeft, sy: sc.scrollTop };
+    sc.setPointerCapture(ev.pointerId);
+  });
+  sc.addEventListener("pointermove", (ev) => {
+    if (!drag) return;
+    sc.scrollLeft = drag.sx - (ev.clientX - drag.x);
+    sc.scrollTop = drag.sy - (ev.clientY - drag.y);
+  });
+  sc.addEventListener("pointerup", () => (drag = null));
+  sc.addEventListener("pointercancel", () => (drag = null));
+
+  sc.addEventListener(
+    "wheel",
+    (ev) => {
+      if (!ev.ctrlKey) return;
+      ev.preventDefault();
+      pzZoom(ev.deltaY < 0 ? "in" : "out");
+    },
+    { passive: false },
+  );
+
+  let raf = 0;
+  sc.addEventListener("scroll", () => {
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      pzTrackPage(sc);
+    });
+  });
+}
+
+function pzTrackPage(sc) {
+  const E = window.pzEd;
+  const mid = sc.getBoundingClientRect().top + sc.clientHeight * 0.4;
+  let current = 1;
+  for (let n = 1; n < E.pages.length + 1; n++) {
+    const p = E.pages[n];
+    if (p && p.wrap.getBoundingClientRect().top <= mid) current = n;
+  }
+  pzIndicate(current, E.doc ? E.doc.numPages : 0);
+}
+
+function pzIndicate(current, total) {
+  const el = document.getElementById("pz-pageno");
+  if (el) el.textContent = total ? current + " / " + total : "–";
+  document.querySelectorAll(".pz-thumb").forEach((t) => {
+    t.classList.toggle("active", Number(t.dataset.page) === current);
+  });
+}
+
+// 'in' | 'out' | 'fit'. Re-renders every page at the new scale and rescales
+// stored annotations so drawings stay glued to the page content.
+async function pzZoom(action) {
+  const E = window.pzEd;
+  if (E.zooming || !E.doc) return Math.round(E.zoom * 100);
+  let z = E.zoom;
+  if (action === "in") z = Math.min(z * 1.25, 4);
+  else if (action === "out") z = Math.max(z / 1.25, 0.3);
+  else z = 1;
+  if (Math.abs(z - E.zoom) < 1e-4) return Math.round(z * 100);
+  E.zooming = true;
+  E.zoom = z;
+  try {
+    for (let n = 1; n < E.pages.length + 1; n++) {
+      const p = E.pages[n];
+      if (!p) continue;
+      const page = await E.doc.getPage(n);
+      const newScale = p.fitScale * z;
+      const ratio = newScale / p.scale;
+      const vp = page.getViewport({ scale: newScale });
+      p.wrap.style.width = vp.width + "px";
+      p.wrap.style.height = vp.height + "px";
+      p.canvas.width = vp.width;
+      p.canvas.height = vp.height;
+      p.overlay.width = vp.width;
+      p.overlay.height = vp.height;
+      await page.render({
+        canvasContext: p.canvas.getContext("2d"),
+        viewport: vp,
+      }).promise;
+      for (const s of window.pzEd.strokes[n] || []) {
+        s.size *= ratio;
+        s.points = s.points.map(([x, y]) => [x * ratio, y * ratio]);
+      }
+      for (const im of window.pzEd.images[n] || []) {
+        im.x *= ratio;
+        im.y *= ratio;
+        im.w *= ratio;
+        im.h *= ratio;
+      }
+      for (const t of window.pzEd.texts[n] || []) {
+        t.x *= ratio;
+        t.y *= ratio;
+        t.size *= ratio;
+      }
+      p.scale = newScale;
+      p.ctx = p.overlay.getContext("2d");
+      pzRedraw(n);
+    }
+  } finally {
+    E.zooming = false;
+  }
+  const el = document.getElementById("pz-zoomlvl");
+  if (el) el.textContent = Math.round(z * 100) + "%";
+  return Math.round(z * 100);
 }
 
 function pzPos(overlay, ev) {
@@ -230,6 +385,14 @@ function pzSetTool(mode, color, size) {
   const E = window.pzEd;
   E.tool = { mode, color, size };
   if (mode !== "image") E.staged = null;
+  const pan = mode === "pan";
+  for (const p of E.pages) {
+    if (p) p.overlay.style.pointerEvents = pan ? "none" : "auto";
+  }
+  const container = document.getElementById("pz-pages");
+  if (container && container.parentElement) {
+    container.parentElement.classList.toggle("pz-panning", pan);
+  }
   return true;
 }
 
@@ -246,14 +409,15 @@ async function pzStageBlob(id, blob) {
   const E = window.pzEd;
   E.bitmaps[id] = await createImageBitmap(blob);
   E.staged = id;
-  E.tool.mode = "image";
+  pzSetTool("image", E.tool.color, E.tool.size);
+  E.staged = id; // pzSetTool clears staged for other modes; keep it
   return true;
 }
 
 function pzStageText(text, color, size) {
   const E = window.pzEd;
   E.stagedText = { text, color, size };
-  E.tool.mode = "text";
+  pzSetTool("text", color, E.tool.size);
   return true;
 }
 

@@ -68,9 +68,14 @@ fn App() -> Element {
     }
 }
 
-/// Shared chrome: top nav, page outlet, promise footer.
+/// Shared chrome: top nav (quick links + all-tools mega menu), page
+/// outlet, promise footer. The footer is hidden on the editor route —
+/// its Figma-style workspace owns the whole viewport.
 #[component]
 fn Shell() -> Element {
+    let mut menu = use_signal(|| false);
+    let route = use_route::<Route>();
+    let in_editor = matches!(&route, Route::ToolPage { slug } if slug == "edit-pdf");
     rsx! {
         header { class: "nav",
             Link { class: "brand", to: Route::Home {},
@@ -78,15 +83,47 @@ fn Shell() -> Element {
                 span { "PrivZapp" }
             }
             nav { class: "nav-links",
-                Link { to: Route::Home {}, "Tools" }
+                Link { class: "nav-quick", to: Route::ToolPage { slug: "merge-pdf".into() }, "Merge PDF" }
+                Link { class: "nav-quick", to: Route::ToolPage { slug: "compress-pdf".into() }, "Compress PDF" }
+                Link { class: "nav-quick", to: Route::ToolPage { slug: "edit-pdf".into() }, "Edit PDF" }
+                Link { class: "nav-quick", to: Route::ToolPage { slug: "compress-img".into() }, "Compress Image" }
+                button {
+                    class: if menu() { "nav-alltools open" } else { "nav-alltools" },
+                    onclick: move |_| menu.set(!menu()),
+                    "All tools "
+                    span { class: "ed-caret", {if menu() { "▴" } else { "▾" }} }
+                }
                 Link { to: Route::Privacy {}, "Privacy" }
                 Link { class: "support-cta", to: Route::Support {}, "♥ Support us" }
+            }
+        }
+        if menu() {
+            div { class: "mega-backdrop", onclick: move |_| menu.set(false) }
+            div { class: "megamenu",
+                for cat in [
+                    pz_core::ToolCategory::Pdf,
+                    pz_core::ToolCategory::Image,
+                    pz_core::ToolCategory::Archive,
+                    pz_core::ToolCategory::Security,
+                ] {
+                    div { class: "mega-col",
+                        h4 { {cat.label()} " tools" }
+                        for tool in pz_core::TOOLS.iter().filter(|t| t.category == cat) {
+                            Link {
+                                to: Route::ToolPage { slug: tool.slug.to_string() },
+                                onclick: move |_| menu.set(false),
+                                span { class: "mega-ico", {tool.icon} }
+                                {tool.name}
+                            }
+                        }
+                    }
+                }
             }
         }
         main { class: "content",
             Outlet::<Route> {}
         }
-        footer { class: "footer",
+        if !in_editor { footer { class: "footer",
             nav { class: "footer-links",
                 Link { to: Route::ToolPage { slug: "merge-pdf".into() }, "Merge PDF" }
                 Link { to: Route::ToolPage { slug: "compress-pdf".into() }, "Compress PDF" }
@@ -103,6 +140,6 @@ fn Shell() -> Element {
                 "PrivZapp is free forever and runs on donations. "
                 Link { to: Route::Support {}, "Keep it alive →" }
             }
-        }
+        } }
     }
 }

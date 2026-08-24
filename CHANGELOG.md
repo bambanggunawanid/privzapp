@@ -75,6 +75,15 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
 - Prerendered SEO content stayed visible above the app after load.
 
 ### Changed
+- The PDF editor is now a Figma-style workspace: full-viewport dark
+  shell with page thumbnails on the left (click to jump), a dot-grid
+  canvas with zoom (buttons or Ctrl+scroll, drawings rescale losslessly),
+  a hand/pan tool, a floating page indicator, and a properties inspector
+  on the right holding pen settings, text, and all document operations.
+  On phones the inspector slides in on demand.
+- Home page got category filter chips and per-category colored icon
+  tiles; the nav gained quick links (Merge/Compress/Edit PDF, Compress
+  Image) and an "All tools" mega-menu listing every tool by category.
 - Support page now links the real donation accounts (Ko-fi and GitHub
   Sponsors); the Liberapay placeholder is gone.
 - Quality sliders move in steps of 10 (10–100).

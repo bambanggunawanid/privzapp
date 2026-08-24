@@ -3,6 +3,16 @@ use pz_core::{ToolCategory, TOOLS};
 
 use crate::Route;
 
+/// Per-category accent class for the tool-card icon tile.
+fn cat_class(cat: ToolCategory) -> &'static str {
+    match cat {
+        ToolCategory::Pdf => "cat-pdf",
+        ToolCategory::Image => "cat-image",
+        ToolCategory::Archive => "cat-archive",
+        ToolCategory::Security => "cat-security",
+    }
+}
+
 #[component]
 pub fn Home() -> Element {
     let categories = [
@@ -11,6 +21,8 @@ pub fn Home() -> Element {
         ToolCategory::Archive,
         ToolCategory::Security,
     ];
+    // None = show everything.
+    let mut filter = use_signal(|| Option::<ToolCategory>::None);
     rsx! {
         section { class: "hero",
             h1 {
@@ -29,17 +41,33 @@ pub fn Home() -> Element {
                 span { class: "badge", "🆓 Free forever" }
             }
         }
+        div { class: "cat-chips",
+            button {
+                class: if filter().is_none() { "cat-chip active" } else { "cat-chip" },
+                onclick: move |_| filter.set(None),
+                "All"
+            }
+            for cat in categories {
+                button {
+                    class: if filter() == Some(cat) { "cat-chip active" } else { "cat-chip" },
+                    onclick: move |_| filter.set(Some(cat)),
+                    {cat.label()}
+                }
+            }
+        }
         for cat in categories {
-            section { class: "tool-section",
-                h2 { {cat.label()} }
-                div { class: "tool-grid",
-                    for tool in TOOLS.iter().filter(|t| t.category == cat) {
-                        Link {
-                            class: "tool-card",
-                            to: Route::ToolPage { slug: tool.slug.to_string() },
-                            div { class: "tool-icon", {tool.icon} }
-                            h3 { {tool.name} }
-                            p { {tool.tagline} }
+            if filter().is_none() || filter() == Some(cat) {
+                section { class: "tool-section",
+                    h2 { {cat.label()} " tools" }
+                    div { class: "tool-grid",
+                        for tool in TOOLS.iter().filter(|t| t.category == cat) {
+                            Link {
+                                class: "tool-card",
+                                to: Route::ToolPage { slug: tool.slug.to_string() },
+                                span { class: format!("tool-tile {}", cat_class(cat)), {tool.icon} }
+                                h3 { {tool.name} }
+                                p { {tool.tagline} }
+                            }
                         }
                     }
                 }
