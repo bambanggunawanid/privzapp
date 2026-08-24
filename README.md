@@ -73,6 +73,10 @@ git config core.hooksPath .githooks
 # Everything CI runs: secret scan, fmt, clippy -D warnings, tests, wasm32 check
 ./scripts/verify.sh
 
+# Playwright UI tests: drives the real wasm bundle in headless Chromium
+# (needs node; first run downloads Chromium and builds the web bundle)
+./scripts/ui-test.sh
+
 # Web (dev server with hot reload; PWA bits are release-only)
 cd app && dx serve --platform web
 

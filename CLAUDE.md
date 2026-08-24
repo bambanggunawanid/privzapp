@@ -45,6 +45,12 @@ crates that compile to both native and wasm32.
 - Everything CI runs: `./scripts/verify.sh` (secret scan, fmt --check,
   clippy -D warnings, workspace tests, wasm32 check). Run it before every
   commit.
+- UI tests: `./scripts/ui-test.sh` — Playwright drives the real wasm
+  bundle in headless Chromium (works in this container). Run it after
+  touching the editor, tool pages, or nav; every owner-reported UI
+  regression gets a test in `tests/ui/` so it can't come back. Own CI
+  job. The engine is main-thread wasm: never trigger engine runs from
+  `oninput` on sliders (freezes the page mid-drag) — use `onchange`.
 - Secrets: the repo is public. Never hardcode credentials — they go in
   `.env` (gitignored, template `.env.example`). `.githooks/pre-commit`
   (installed via `git config core.hooksPath .githooks`) and the verify

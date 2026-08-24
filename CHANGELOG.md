@@ -92,6 +92,15 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
 - Reorder pages by dragging thumbnails in the left rail (the old
   "3,1,2" text input is gone).
 
+### Fixed
+- Compress/Convert Image: the page froze while dragging the quality
+  slider (the wasm engine recompressed on every tick, blocking the main
+  thread). Dragging now only updates the number; the preview recomputes
+  once when the slider is released or via the new +/−10 buttons.
+- Compress Image: Clear left the old preview image on screen.
+- Image uploads now show real thumbnails (one per file) instead of
+  name-and-size rows, so you can see what actually got picked.
+
 ### Changed
 - Editor defaults: the cursor (select/move/edit) tool is active on
   open — drawing is now an explicit choice.

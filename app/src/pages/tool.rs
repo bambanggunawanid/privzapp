@@ -10,6 +10,20 @@ use pz_img::TARGET_FORMATS;
 use crate::save::save_file;
 use crate::Route;
 
+/// Browser-displayable image MIME by file extension — used for upload
+/// thumbnails so users can see what actually got picked.
+fn image_mime(name: &str) -> Option<&'static str> {
+    let ext = name.rsplit('.').next()?.to_ascii_lowercase();
+    Some(match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        _ => return None,
+    })
+}
+
 #[component]
 pub fn ToolPage(slug: String) -> Element {
     // The editor has its own bespoke page; everything else is generic.
@@ -48,6 +62,22 @@ pub fn ToolPage(slug: String) -> Element {
     let mut scale = use_signal(|| 2u32);
 
     let meta = *meta;
+
+    // Per-file upload thumbnails (blob URLs), aligned with `files`.
+    let mut thumbs = use_signal(Vec::<Option<String>>::new);
+    let mut add_file = move |name: String, bytes: Vec<u8>| {
+        let thumb = image_mime(&name).and_then(|mime| crate::save::object_url(&bytes, mime));
+        thumbs.write().push(thumb);
+        files.write().push(InputFile { name, bytes });
+    };
+    let mut remove_file = move |i: usize| {
+        files.write().remove(i);
+        if i < thumbs.read().len() {
+            if let Some(url) = thumbs.write().remove(i) {
+                crate::save::revoke_object_url(&url);
+            }
+        }
+    };
 
     // Live before/after preview for the lossy image tools: re-runs the
     // engine on the first file whenever quality/format changes.
@@ -169,10 +199,7 @@ pub fn ToolPage(slug: String) -> Element {
                     spawn(async move {
                         for f in evt.files() {
                             match f.read_bytes().await {
-                                Ok(bytes) => files.write().push(InputFile {
-                                    name: f.name(),
-                                    bytes: bytes.to_vec(),
-                                }),
+                                Ok(bytes) => add_file(f.name(), bytes.to_vec()),
                                 Err(e) => error.set(format!("could not read file: {e}")),
                             }
                         }
@@ -196,10 +223,7 @@ pub fn ToolPage(slug: String) -> Element {
                     spawn(async move {
                         for f in evt.files() {
                             match f.read_bytes().await {
-                                Ok(bytes) => files.write().push(InputFile {
-                                    name: f.name(),
-                                    bytes: bytes.to_vec(),
-                                }),
+                                Ok(bytes) => add_file(f.name(), bytes.to_vec()),
                                 Err(e) => error.set(format!("could not read file: {e}")),
                             }
                         }
@@ -209,16 +233,45 @@ pub fn ToolPage(slug: String) -> Element {
             }
 
             if !files.read().is_empty() {
-                ul { class: "file-list",
-                    for (i, f) in files.read().iter().enumerate() {
-                        li { key: "{i}-{f.name}",
-                            span { class: "file-name", "{f.name}" }
-                            span { class: "file-size", {human_size(f.bytes.len())} }
-                            button {
-                                class: "icon-btn",
-                                title: "Remove",
-                                onclick: move |_| { files.write().remove(i); },
-                                "✕"
+                if thumbs.read().iter().any(|t| t.is_some()) {
+                    // Image uploads: show the pictures themselves so users
+                    // can verify what actually got picked.
+                    div { class: "thumb-grid",
+                        for (i, f) in files.read().iter().enumerate() {
+                            div { class: "thumb-card", key: "{i}-{f.name}",
+                                if let Some(Some(url)) = thumbs.read().get(i) {
+                                    img { class: "thumb-img", src: "{url}", alt: "{f.name}" }
+                                } else {
+                                    div { class: "thumb-img thumb-generic", "📄" }
+                                }
+                                div { class: "thumb-meta",
+                                    span { class: "file-name", "{f.name}" }
+                                    span { class: "file-size", {human_size(f.bytes.len())} }
+                                }
+                                button {
+                                    class: "icon-btn thumb-remove",
+                                    title: "Remove",
+                                    onclick: move |_| {
+                                        remove_file(i);
+                                        refresh_preview();
+                                    },
+                                    "✕"
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    ul { class: "file-list",
+                        for (i, f) in files.read().iter().enumerate() {
+                            li { key: "{i}-{f.name}",
+                                span { class: "file-name", "{f.name}" }
+                                span { class: "file-size", {human_size(f.bytes.len())} }
+                                button {
+                                    class: "icon-btn",
+                                    title: "Remove",
+                                    onclick: move |_| { remove_file(i); },
+                                    "✕"
+                                }
                             }
                         }
                     }
@@ -233,16 +286,43 @@ pub fn ToolPage(slug: String) -> Element {
                             OptionKind::Quality => rsx! {
                                 div { class: "opt",
                                     label { "Quality: {quality}" }
-                                    input {
-                                        r#type: "range",
-                                        min: "10",
-                                        max: "100",
-                                        step: "10",
-                                        value: "{quality}",
-                                        oninput: move |evt| {
-                                            quality.set(evt.value().parse().unwrap_or(80));
-                                            refresh_preview();
-                                        },
+                                    div { class: "quality-row",
+                                        button {
+                                            class: "ed-icon",
+                                            title: "Quality −10",
+                                            onclick: move |_| {
+                                                quality.set(quality().saturating_sub(10).max(10));
+                                                refresh_preview();
+                                            },
+                                            "−"
+                                        }
+                                        input {
+                                            r#type: "range",
+                                            min: "10",
+                                            max: "100",
+                                            step: "10",
+                                            value: "{quality}",
+                                            // While dragging only the label updates —
+                                            // the engine is main-thread wasm, so live
+                                            // recompression froze the page mid-slide.
+                                            oninput: move |evt| {
+                                                quality.set(evt.value().parse().unwrap_or(80));
+                                            },
+                                            // Fires once on release: recompute preview.
+                                            onchange: move |evt| {
+                                                quality.set(evt.value().parse().unwrap_or(80));
+                                                refresh_preview();
+                                            },
+                                        }
+                                        button {
+                                            class: "ed-icon",
+                                            title: "Quality +10",
+                                            onclick: move |_| {
+                                                quality.set((quality() + 10).min(100));
+                                                refresh_preview();
+                                            },
+                                            "+"
+                                        }
                                     }
                                 }
                             },
@@ -469,9 +549,13 @@ pub fn ToolPage(slug: String) -> Element {
                         class: "ghost",
                         onclick: move |_| {
                             files.set(Vec::new());
+                            for url in thumbs.write().drain(..).flatten() {
+                                crate::save::revoke_object_url(&url);
+                            }
                             outputs.set(Vec::new());
                             error.set(String::new());
                             notice.set(String::new());
+                            refresh_preview();
                         },
                         "Clear"
                     }
