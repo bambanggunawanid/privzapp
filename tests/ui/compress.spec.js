@@ -135,6 +135,27 @@ test.describe("compress image", () => {
     await expect(page.locator(".preview-after")).toBeVisible({ timeout: 15_000 });
   });
 
+  test("all image tools show the live preview (grayscale, flip)", async ({ page }) => {
+    // Grayscale: preview appears right after upload.
+    await page.goto("/tool/grayscale-img/");
+    await page.waitForSelector("#file-in", { state: "attached", timeout: 45_000 });
+    await page.setInputFiles("#file-in", pngFiles(1));
+    await expect(page.locator(".preview-after")).toBeVisible({ timeout: 15_000 });
+
+    // Flip: changing the direction recomputes the preview.
+    await page.goto("/tool/flip-img/");
+    await page.waitForSelector("#file-in", { state: "attached", timeout: 45_000 });
+    await page.setInputFiles("#file-in", pngFiles(1));
+    await expect(page.locator(".preview-after")).toBeVisible({ timeout: 15_000 });
+    const srcBefore = await page.locator(".preview-after").getAttribute("src");
+    await page.locator("select").selectOption("vertical");
+    await expect
+      .poll(async () => page.locator(".preview-after").getAttribute("src"), {
+        timeout: 15_000,
+      })
+      .not.toBe(srcBefore);
+  });
+
   test("Clear removes files, thumbnails AND the preview (regression)", async ({ page }) => {
     await page.setInputFiles("#file-in", pngFiles(2));
     await expect(page.locator(".thumb-card")).toHaveCount(2);

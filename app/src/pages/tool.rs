@@ -86,7 +86,19 @@ pub fn ToolPage(slug: String) -> Element {
     // (file, settings) so switching thumbnails back and forth is instant —
     // deliberately NOT persisted: uploads don't survive a refresh either,
     // and the privacy promise is "leave nothing behind".
-    let has_preview = matches!(meta.slug, "compress-img" | "convert-img");
+    let has_preview = matches!(
+        meta.slug,
+        "compress-img"
+            | "convert-img"
+            | "flip-img"
+            | "upscale-img"
+            | "grayscale-img"
+            | "blur-img"
+            | "watermark-img"
+            | "strip-exif"
+            | "crop-img"
+            | "rotate-img"
+    );
     let mut preview_idx = use_signal(|| 0usize);
     let mut preview_url = use_signal(|| Option::<String>::None);
     let mut preview_note = use_signal(String::new);
@@ -110,7 +122,23 @@ pub fn ToolPage(slug: String) -> Element {
             preview_note.set(String::new());
             return;
         };
-        let key = format!("{idx}:{}:{}:{}", quality(), percent(), format());
+        // Every setting any previewable tool reads goes into the key.
+        let key = format!(
+            "{:?}",
+            (
+                idx,
+                quality(),
+                percent(),
+                format(),
+                scale(),
+                angle(),
+                text(),
+                width(),
+                height(),
+                off_x(),
+                off_y(),
+            )
+        );
         if let Some((url, note)) = preview_cache.read().get(&key).cloned() {
             preview_url.set(url);
             preview_note.set(note);
@@ -118,9 +146,17 @@ pub fn ToolPage(slug: String) -> Element {
         }
         let opts = ToolOptions {
             quality: quality(),
+            width: width().trim().parse().unwrap_or(0),
+            height: height().trim().parse().unwrap_or(0),
             format: format(),
+            pages: pages_spec(),
+            angle: angle(),
+            text: text(),
+            x: off_x().trim().parse().unwrap_or(0),
+            y: off_y().trim().parse().unwrap_or(0),
+            password: password(),
+            scale: scale(),
             percent: percent(),
-            ..ToolOptions::default()
         };
         spawn(async move {
             match pz_engine::run(meta.slug, std::slice::from_ref(&f), &opts) {
@@ -420,6 +456,7 @@ pub fn ToolPage(slug: String) -> Element {
                                             placeholder: "Width px",
                                             value: "{width}",
                                             oninput: move |evt| width.set(evt.value()),
+                                            onchange: move |_| refresh_preview(),
                                         }
                                         span { "×" }
                                         input {
@@ -427,6 +464,7 @@ pub fn ToolPage(slug: String) -> Element {
                                             placeholder: "Height px",
                                             value: "{height}",
                                             oninput: move |evt| height.set(evt.value()),
+                                            onchange: move |_| refresh_preview(),
                                         }
                                     }
                                 }
@@ -461,7 +499,10 @@ pub fn ToolPage(slug: String) -> Element {
                                 div { class: "opt",
                                     label { "Rotate by" }
                                     select {
-                                        onchange: move |evt| angle.set(evt.value().parse().unwrap_or(90)),
+                                        onchange: move |evt| {
+                                            angle.set(evt.value().parse().unwrap_or(90));
+                                            refresh_preview();
+                                        },
                                         option { value: "90", "90° clockwise" }
                                         option { value: "180", "180°" }
                                         option { value: "270", "270° clockwise" }
@@ -476,6 +517,7 @@ pub fn ToolPage(slug: String) -> Element {
                                         placeholder: "CONFIDENTIAL",
                                         value: "{text}",
                                         oninput: move |evt| text.set(evt.value()),
+                                        onchange: move |_| refresh_preview(),
                                     }
                                 }
                             },
@@ -499,12 +541,14 @@ pub fn ToolPage(slug: String) -> Element {
                                             placeholder: "X",
                                             value: "{off_x}",
                                             oninput: move |evt| off_x.set(evt.value()),
+                                            onchange: move |_| refresh_preview(),
                                         }
                                         input {
                                             r#type: "number",
                                             placeholder: "Y",
                                             value: "{off_y}",
                                             oninput: move |evt| off_y.set(evt.value()),
+                                            onchange: move |_| refresh_preview(),
                                         }
                                         span { "→" }
                                         input {
@@ -512,6 +556,7 @@ pub fn ToolPage(slug: String) -> Element {
                                             placeholder: "Width px",
                                             value: "{width}",
                                             oninput: move |evt| width.set(evt.value()),
+                                            onchange: move |_| refresh_preview(),
                                         }
                                         span { "×" }
                                         input {
@@ -519,6 +564,7 @@ pub fn ToolPage(slug: String) -> Element {
                                             placeholder: "Height px",
                                             value: "{height}",
                                             oninput: move |evt| height.set(evt.value()),
+                                            onchange: move |_| refresh_preview(),
                                         }
                                     }
                                 }
@@ -569,7 +615,10 @@ pub fn ToolPage(slug: String) -> Element {
                                 div { class: "opt",
                                     label { "Mirror direction" }
                                     select {
-                                        onchange: move |evt| format.set(evt.value()),
+                                        onchange: move |evt| {
+                                            format.set(evt.value());
+                                            refresh_preview();
+                                        },
                                         option { value: "horizontal", "Horizontal (left ↔ right)" }
                                         option { value: "vertical", "Vertical (top ↕ bottom)" }
                                     }
@@ -579,7 +628,10 @@ pub fn ToolPage(slug: String) -> Element {
                                 div { class: "opt",
                                     label { "Upscale factor" }
                                     select {
-                                        onchange: move |evt| scale.set(evt.value().parse().unwrap_or(2)),
+                                        onchange: move |evt| {
+                                            scale.set(evt.value().parse().unwrap_or(2));
+                                            refresh_preview();
+                                        },
                                         option { value: "2", "2× (double size)" }
                                         option { value: "4", "4× (quadruple size)" }
                                     }
@@ -594,6 +646,10 @@ pub fn ToolPage(slug: String) -> Element {
                                         max: "100",
                                         value: "{quality}",
                                         oninput: move |evt| quality.set(evt.value().parse().unwrap_or(50)),
+                                        onchange: move |evt| {
+                                            quality.set(evt.value().parse().unwrap_or(50));
+                                            refresh_preview();
+                                        },
                                     }
                                 }
                             },

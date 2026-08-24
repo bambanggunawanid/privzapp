@@ -96,6 +96,10 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
 - Compress and Convert Image: Resolution control (10–100% of the
   original, ±10 buttons) — downscaling is the biggest size lever once
   quality has done its part.
+- The live before/after preview now covers every image tool — Flip,
+  Upscale, Grayscale, Blur, Watermark, Strip Metadata, Crop and Rotate
+  join Compress and Convert; option changes recompute on release/commit,
+  never mid-drag.
 - Live previews are cached in memory per image + settings, so switching
   between thumbnails is instant instead of recompressing every click.
   Deliberately not persisted across refreshes: uploads never touch
