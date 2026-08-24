@@ -1,0 +1,30 @@
+# PrivZapp — static, no-upload file tools.
+#
+# Works with `docker compose`, `podman-compose`, and Portainer:
+#   docker compose up -d --build
+#   podman-compose up -d --build
+#   Portainer: Stacks -> Add stack -> Repository, compose path docker-compose.yml
+#     (Portainer builds the image from this repo's Dockerfile.)
+
+services:
+  privzapp:
+    build:
+      context: .
+    image: privzapp:latest
+    container_name: privzapp
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+    # Hardening: the container only serves static files; nothing needs to
+    # write anywhere except nginx's own tmp dirs.
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

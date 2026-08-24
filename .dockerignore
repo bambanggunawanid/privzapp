@@ -1,0 +1,8 @@
+# Keep the build context small: the target dir alone is multiple GB.
+target/
+dist/
+.git/
+.claude/
+*.log
+Dockerfile
+docker-compose.yml
