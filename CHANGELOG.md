@@ -93,9 +93,9 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
   "3,1,2" text input is gone).
 
 ### Added
-- Compress Image: Resolution control (10–100% of the original, ±10
-  buttons) — downscaling is the biggest size lever once quality has
-  done its part; the filename keeps the original name.
+- Compress and Convert Image: Resolution control (10–100% of the
+  original, ±10 buttons) — downscaling is the biggest size lever once
+  quality has done its part.
 - Live previews are cached in memory per image + settings, so switching
   between thumbnails is instant instead of recompressing every click.
   Deliberately not persisted across refreshes: uploads never touch

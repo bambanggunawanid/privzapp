@@ -121,6 +121,20 @@ test.describe("compress image", () => {
     expect(await page.locator(".preview-after").getAttribute("src")).toBe(src1);
   });
 
+  test("convert image also offers the resolution control", async ({ page }) => {
+    await page.goto("/tool/convert-img/");
+    await page.waitForSelector("#file-in", { state: "attached", timeout: 45_000 });
+    await page.setInputFiles("#file-in", pngFiles(1));
+    await expect(page.locator(".opt label", { hasText: "Resolution" })).toHaveText(
+      "Resolution: 100% of original",
+    );
+    await page.locator('button[title="Resolution −10%"]').click();
+    await expect(page.locator(".opt label", { hasText: "Resolution" })).toHaveText(
+      "Resolution: 90% of original",
+    );
+    await expect(page.locator(".preview-after")).toBeVisible({ timeout: 15_000 });
+  });
+
   test("Clear removes files, thumbnails AND the preview (regression)", async ({ page }) => {
     await page.setInputFiles("#file-in", pngFiles(2));
     await expect(page.locator(".thumb-card")).toHaveCount(2);

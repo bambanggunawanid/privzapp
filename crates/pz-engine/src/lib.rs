@@ -104,7 +104,7 @@ pub fn run(
             .collect(),
         "convert-img" => files
             .iter()
-            .map(|f| pz_img::convert(&f.name, &f.bytes, &opts.format, opts.quality))
+            .map(|f| pz_img::convert(&f.name, &f.bytes, &opts.format, opts.quality, opts.percent))
             .collect(),
         "resize-img" => files
             .iter()

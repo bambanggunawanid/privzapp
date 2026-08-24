@@ -123,11 +123,25 @@ fn encode(img: &DynamicImage, fmt: ImageFormat, quality: u8) -> Result<Vec<u8>, 
     Ok(buf.into_inner())
 }
 
-/// Convert to `target` format ("png", "jpg", ...).
-pub fn convert(name: &str, bytes: &[u8], target: &str, quality: u8) -> Result<OutputFile, PzError> {
+/// Convert to `target` format ("png", "jpg", ...). `percent` scales the
+/// output resolution (10–100; anything else means keep).
+pub fn convert(
+    name: &str,
+    bytes: &[u8],
+    target: &str,
+    quality: u8,
+    percent: u32,
+) -> Result<OutputFile, PzError> {
     let fmt = fmt_for_ext(target)
         .ok_or_else(|| PzError::Unsupported(format!("unknown target format \"{target}\"")))?;
     let (img, _) = decode(bytes)?;
+    let img = if (10..100).contains(&percent) {
+        let w = (img.width() * percent / 100).max(1);
+        let h = (img.height() * percent / 100).max(1);
+        img.resize_exact(w, h, FilterType::Lanczos3)
+    } else {
+        img
+    };
     let out = match fmt {
         ImageFormat::Png => encode_png_best(&img, quality)?,
         _ => encode(&img, fmt, quality)?,
@@ -524,7 +538,7 @@ mod tests {
 
     #[test]
     fn convert_png_to_jpg() {
-        let out = convert("photo.png", &sample_png(), "jpg", 80).unwrap();
+        let out = convert("photo.png", &sample_png(), "jpg", 80, 100).unwrap();
         assert_eq!(out.name, "photo.jpg");
         assert_eq!(out.mime, "image/jpeg");
         assert_eq!(image::guess_format(&out.bytes).unwrap(), ImageFormat::Jpeg);
@@ -602,7 +616,14 @@ mod tests {
 
     #[test]
     fn convert_rejects_unknown_target() {
-        assert!(convert("a.png", &sample_png(), "xyz", 80).is_err());
+        assert!(convert("a.png", &sample_png(), "xyz", 80, 100).is_err());
+    }
+
+    #[test]
+    fn convert_resolution_percent_shrinks_dimensions() {
+        let out = convert("photo.png", &sample_png(), "jpg", 80, 50).unwrap();
+        let img = image::load_from_memory(&out.bytes).unwrap();
+        assert_eq!((img.width(), img.height()), (32, 24)); // 64x48 → 50%
     }
 
     #[test]

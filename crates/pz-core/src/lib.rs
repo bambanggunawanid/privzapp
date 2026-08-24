@@ -317,7 +317,11 @@ pub const TOOLS: &[ToolMeta] = &[
         accept: "image/*",
         multi: true,
         min_files: 1,
-        options: &[OptionKind::TargetFormat, OptionKind::Quality],
+        options: &[
+            OptionKind::TargetFormat,
+            OptionKind::Quality,
+            OptionKind::ResolutionPercent,
+        ],
         icon: "🔁",
     },
     ToolMeta {
