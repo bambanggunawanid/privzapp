@@ -21,6 +21,17 @@ jobs:
       # Same script contributors run locally — one definition of "green".
       - run: ./scripts/verify.sh
 
+  # RustSec advisory scan over Cargo.lock: fails on known vulnerabilities
+  # in the dependency tree (unmaintained/unsound entries stay warnings).
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-binstall && cargo binstall -y cargo-audit
+      - run: cargo audit
+
   ui-tests:
     runs-on: ubuntu-latest
     steps:

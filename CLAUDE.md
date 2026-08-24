@@ -93,6 +93,11 @@ crates that compile to both native and wasm32.
 
 ## Gotchas
 
+- Prod serves a strict CSP from `deploy/security-headers.conf` (ADR-0008).
+  Anything that loads a new kind of resource (fonts, workers, media)
+  must extend the policy there, or it works in `dx serve` and breaks
+  only in the container.
+
 - `.cargo/config.toml` sets `getrandom_backend="wasm_js"` for wasm builds
   (getrandom 0.3 via lopdf). pz-crypto separately enables getrandom 0.2 `js`.
   Both are needed; don't "clean up" either.

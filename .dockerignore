@@ -1,8 +1,17 @@
-# Keep the build context small: the target dir alone is multiple GB.
+# Keep the Docker build context to what scripts/build-web.sh needs
+# (Cargo workspace + app assets + scripts). Everything below is either
+# huge, host-only, or must never enter an image layer.
 target/
 dist/
+**/node_modules/
+tests/
+docs/
 .git/
+.github/
+.githooks/
 .claude/
+# Secrets stay on the host — the build takes BASE_URL as a build arg.
+.env
 *.log
 Dockerfile
 docker-compose.yml

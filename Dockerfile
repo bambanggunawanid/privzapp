@@ -35,10 +35,20 @@ ENV BASE_URL=$BASE_URL
 # prerendered SEO pages (per-tool HTML, sitemap.xml, robots.txt).
 RUN ./scripts/build-web.sh
 
+# Precompress the bundle once at build time; nginx (gzip_static) serves
+# the .gz siblings directly — the multi-MB wasm shrinks ~3x with zero
+# per-request CPU.
+RUN cd target/dx/privzapp/release/web/public \
+    && find . -type f \( -name '*.wasm' -o -name '*.js' -o -name '*.mjs' \
+         -o -name '*.css' -o -name '*.html' -o -name '*.json' \
+         -o -name '*.svg' -o -name '*.webmanifest' -o -name '*.xml' \
+         -o -name '*.txt' \) -exec gzip -9 -k {} +
+
 # ---- runtime stage --------------------------------------------------------
 FROM docker.io/library/nginx:1.27-alpine
 
 COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
+COPY deploy/security-headers.conf /etc/nginx/pz-security-headers.conf
 COPY --from=builder /src/target/dx/privzapp/release/web/public /usr/share/nginx/html
 
 EXPOSE 80
