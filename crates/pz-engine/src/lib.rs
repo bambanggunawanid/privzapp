@@ -112,7 +112,7 @@ pub fn run(
             .collect(),
         "compress-img" => files
             .iter()
-            .map(|f| pz_img::compress(&f.name, &f.bytes, opts.quality))
+            .map(|f| pz_img::compress(&f.name, &f.bytes, opts.quality, opts.percent))
             .collect(),
         "strip-exif" => files
             .iter()

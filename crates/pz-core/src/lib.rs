@@ -125,6 +125,8 @@ pub enum OptionKind {
     Password,
     /// Rename pattern, e.g. "vacation-{n}".
     NamePattern,
+    /// Output resolution as a percentage of the original (10–100).
+    ResolutionPercent,
     /// Left/top/right/bottom margin inputs (PDF points or pixels).
     Margins,
     /// Horizontal / vertical mirror select.
@@ -337,7 +339,7 @@ pub const TOOLS: &[ToolMeta] = &[
         accept: "image/*",
         multi: true,
         min_files: 1,
-        options: &[OptionKind::Quality],
+        options: &[OptionKind::Quality, OptionKind::ResolutionPercent],
         icon: "🪶",
     },
     ToolMeta {
@@ -523,6 +525,8 @@ pub struct ToolOptions {
     pub password: String,
     /// Upscale factor (2 or 4).
     pub scale: u32,
+    /// Output resolution percentage for compressors (10–100; 100 = keep).
+    pub percent: u32,
 }
 
 impl Default for ToolOptions {
@@ -539,6 +543,7 @@ impl Default for ToolOptions {
             y: 0,
             password: String::new(),
             scale: 2,
+            percent: 100,
         }
     }
 }

@@ -60,6 +60,7 @@ pub fn ToolPage(slug: String) -> Element {
     let mut off_y = use_signal(String::new);
     let mut password = use_signal(String::new);
     let mut scale = use_signal(|| 2u32);
+    let mut percent = use_signal(|| 100u32);
 
     let meta = *meta;
 
@@ -81,27 +82,44 @@ pub fn ToolPage(slug: String) -> Element {
 
     // Live before/after preview for the lossy image tools: re-runs the
     // engine on the *selected* file (click a thumbnail to pick) whenever
-    // quality/format changes.
+    // quality/resolution/format changes. Results are cached in memory per
+    // (file, settings) so switching thumbnails back and forth is instant —
+    // deliberately NOT persisted: uploads don't survive a refresh either,
+    // and the privacy promise is "leave nothing behind".
     let has_preview = matches!(meta.slug, "compress-img" | "convert-img");
     let mut preview_idx = use_signal(|| 0usize);
     let mut preview_url = use_signal(|| Option::<String>::None);
     let mut preview_note = use_signal(String::new);
+    // key "{idx}:{quality}:{percent}:{format}" → (blob url, note).
+    let mut preview_cache =
+        use_signal(std::collections::HashMap::<String, (Option<String>, String)>::new);
+    let mut clear_preview_cache = move || {
+        for (_, (url, _)) in preview_cache.write().drain() {
+            if let Some(u) = url {
+                crate::save::revoke_object_url(&u);
+            }
+        }
+    };
     let mut refresh_preview = move || {
         if !has_preview {
             return;
         }
         let idx = preview_idx().min(files.read().len().saturating_sub(1));
         let Some(f) = files.read().get(idx).cloned() else {
-            if let Some(old) = preview_url() {
-                crate::save::revoke_object_url(&old);
-            }
             preview_url.set(None);
             preview_note.set(String::new());
             return;
         };
+        let key = format!("{idx}:{}:{}:{}", quality(), percent(), format());
+        if let Some((url, note)) = preview_cache.read().get(&key).cloned() {
+            preview_url.set(url);
+            preview_note.set(note);
+            return;
+        }
         let opts = ToolOptions {
             quality: quality(),
             format: format(),
+            percent: percent(),
             ..ToolOptions::default()
         };
         spawn(async move {
@@ -112,27 +130,33 @@ pub fn ToolPage(slug: String) -> Element {
                             - (o.bytes.len() as i64 * 100)
                                 .checked_div(f.bytes.len() as i64)
                                 .unwrap_or(100);
-                        preview_note.set(format!(
+                        let note = format!(
                             "{}: {} → {} ({}{}%)",
                             o.name,
                             human_size(f.bytes.len()),
                             human_size(o.bytes.len()),
                             if saved >= 0 { "−" } else { "+" },
                             saved.abs()
-                        ));
+                        );
                         // Browsers can't display every output format.
                         let displayable = matches!(
                             o.mime,
                             "image/png" | "image/jpeg" | "image/webp" | "image/gif" | "image/bmp"
                         );
-                        if let Some(old) = preview_url() {
-                            crate::save::revoke_object_url(&old);
-                        }
-                        preview_url.set(if displayable {
+                        let url = if displayable {
                             crate::save::object_url(&o.bytes, o.mime)
                         } else {
                             None
-                        });
+                        };
+                        // The cache owns URL lifetimes (revoked on clear).
+                        if preview_cache.read().len() >= 60 {
+                            clear_preview_cache();
+                        }
+                        preview_cache
+                            .write()
+                            .insert(key, (url.clone(), note.clone()));
+                        preview_url.set(url);
+                        preview_note.set(note);
                     }
                 }
                 Err(e) => preview_note.set(e.to_string()),
@@ -153,6 +177,7 @@ pub fn ToolPage(slug: String) -> Element {
             y: off_y().trim().parse().unwrap_or(0),
             password: password(),
             scale: scale(),
+            percent: percent(),
         };
         busy.set(true);
         error.set(String::new());
@@ -206,6 +231,7 @@ pub fn ToolPage(slug: String) -> Element {
                                 Err(e) => error.set(format!("could not read file: {e}")),
                             }
                         }
+                        clear_preview_cache();
                         refresh_preview();
                     });
                 },
@@ -230,6 +256,7 @@ pub fn ToolPage(slug: String) -> Element {
                                 Err(e) => error.set(format!("could not read file: {e}")),
                             }
                         }
+                        clear_preview_cache();
                         refresh_preview();
                     });
                 },
@@ -269,6 +296,7 @@ pub fn ToolPage(slug: String) -> Element {
                                     title: "Remove",
                                     onclick: move |_| {
                                         remove_file(i);
+                                        clear_preview_cache();
                                         refresh_preview();
                                     },
                                     "✕"
@@ -335,6 +363,47 @@ pub fn ToolPage(slug: String) -> Element {
                                             title: "Quality +10",
                                             onclick: move |_| {
                                                 quality.set((quality() + 10).min(100));
+                                                refresh_preview();
+                                            },
+                                            "+"
+                                        }
+                                    }
+                                }
+                            },
+                            OptionKind::ResolutionPercent => rsx! {
+                                div { class: "opt",
+                                    label { "Resolution: {percent}% of original" }
+                                    div { class: "quality-row",
+                                        button {
+                                            class: "ed-icon",
+                                            title: "Resolution −10%",
+                                            onclick: move |_| {
+                                                percent.set(percent().saturating_sub(10).max(10));
+                                                refresh_preview();
+                                            },
+                                            "−"
+                                        }
+                                        input {
+                                            r#type: "range",
+                                            min: "10",
+                                            max: "100",
+                                            step: "10",
+                                            value: "{percent}",
+                                            // Label-only while dragging (main-thread
+                                            // wasm); recompute once on release.
+                                            oninput: move |evt| {
+                                                percent.set(evt.value().parse().unwrap_or(100));
+                                            },
+                                            onchange: move |evt| {
+                                                percent.set(evt.value().parse().unwrap_or(100));
+                                                refresh_preview();
+                                            },
+                                        }
+                                        button {
+                                            class: "ed-icon",
+                                            title: "Resolution +10%",
+                                            onclick: move |_| {
+                                                percent.set((percent() + 10).min(100));
                                                 refresh_preview();
                                             },
                                             "+"
@@ -591,6 +660,7 @@ pub fn ToolPage(slug: String) -> Element {
                             outputs.set(Vec::new());
                             error.set(String::new());
                             notice.set(String::new());
+                            clear_preview_cache();
                             refresh_preview();
                         },
                         "Clear"

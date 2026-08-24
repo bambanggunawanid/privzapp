@@ -475,8 +475,22 @@ fn width_ratio(w: u32, h: u32) -> f64 {
 
 /// Re-encode in the same format with stronger compression. For JPEG the
 /// quality slider applies; PNG gets max lossless compression.
-pub fn compress(name: &str, bytes: &[u8], quality: u8) -> Result<OutputFile, PzError> {
+/// `percent` scales the output resolution (10–100; anything else means
+/// keep) — the biggest size lever once quality has done its part.
+pub fn compress(
+    name: &str,
+    bytes: &[u8],
+    quality: u8,
+    percent: u32,
+) -> Result<OutputFile, PzError> {
     let (img, fmt) = decode(bytes)?;
+    let img = if (10..100).contains(&percent) {
+        let w = (img.width() * percent / 100).max(1);
+        let h = (img.height() * percent / 100).max(1);
+        img.resize_exact(w, h, FilterType::Lanczos3)
+    } else {
+        img
+    };
     let out = match fmt {
         ImageFormat::Png => encode_png_best(&img, quality)?,
         _ => encode(&img, fmt, quality)?,
@@ -534,7 +548,7 @@ mod tests {
     #[test]
     fn compress_never_grows() {
         let src = sample_png();
-        let out = compress("photo.png", &src, 80).unwrap();
+        let out = compress("photo.png", &src, 80, 100).unwrap();
         assert!(out.bytes.len() <= src.len());
     }
 
@@ -553,14 +567,37 @@ mod tests {
         let mut buf = Cursor::new(Vec::new());
         img.write_to(&mut buf, ImageFormat::Png).unwrap();
         let src = buf.into_inner();
-        let hi = compress("c.png", &src, 100).unwrap();
-        let lo = compress("c.png", &src, 20).unwrap();
+        let hi = compress("c.png", &src, 100, 100).unwrap();
+        let lo = compress("c.png", &src, 20, 100).unwrap();
         assert!(
             lo.bytes.len() < hi.bytes.len(),
             "q20 ({}) should be smaller than q100 ({})",
             lo.bytes.len(),
             hi.bytes.len()
         );
+    }
+
+    #[test]
+    fn compress_resolution_percent_shrinks_dimensions_and_size() {
+        let src = sample_png();
+        let half = compress("photo.png", &src, 80, 50).unwrap();
+        let img = image::load_from_memory(&half.bytes).unwrap();
+        assert_eq!((img.width(), img.height()), (32, 24)); // 64x48 → 50%
+
+        // Size must drop on content that doesn't compress losslessly.
+        let noisy = DynamicImage::ImageRgba8(image::RgbaImage::from_fn(128, 128, |x, y| {
+            let mut h = x.wrapping_mul(2654435761) ^ y.wrapping_mul(2246822519);
+            h ^= h >> 15;
+            h = h.wrapping_mul(2246822519);
+            h ^= h >> 13;
+            image::Rgba([h as u8, (h >> 8) as u8, (h >> 16) as u8, 255])
+        }));
+        let mut buf = Cursor::new(Vec::new());
+        noisy.write_to(&mut buf, ImageFormat::Png).unwrap();
+        let nsrc = buf.into_inner();
+        let nfull = compress("n.png", &nsrc, 100, 100).unwrap();
+        let nhalf = compress("n.png", &nsrc, 100, 50).unwrap();
+        assert!(nhalf.bytes.len() < nfull.bytes.len());
     }
 
     #[test]

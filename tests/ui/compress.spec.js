@@ -81,6 +81,46 @@ test.describe("compress image", () => {
       .not.toBe(srcBefore);
   });
 
+  test("resolution percent control shrinks output and steps by 10", async ({ page }) => {
+    await page.setInputFiles("#file-in", pngFiles(1));
+    await expect(page.locator(".preview-after")).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator(".opt label").nth(1)).toHaveText(
+      "Resolution: 100% of original",
+    );
+    await page.locator('button[title="Resolution −10%"]').click();
+    await expect(page.locator(".opt label").nth(1)).toHaveText(
+      "Resolution: 90% of original",
+    );
+    // Dropping to 50% via the slider recomputes on release.
+    const srcBefore = await page.locator(".preview-after").getAttribute("src");
+    const slider = page.locator('input[type="range"]').nth(1);
+    await slider.evaluate((el) => {
+      el.value = 50;
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await expect(page.locator(".opt label").nth(1)).toHaveText(
+      "Resolution: 50% of original",
+    );
+    await expect
+      .poll(async () => page.locator(".preview-after").getAttribute("src"), {
+        timeout: 15_000,
+      })
+      .not.toBe(srcBefore);
+  });
+
+  test("switching thumbnails reuses cached previews (no recompress)", async ({ page }) => {
+    await page.setInputFiles("#file-in", pngFiles(2));
+    await expect(page.locator(".preview p")).toContainText("photo-1", { timeout: 15_000 });
+    const src1 = await page.locator(".preview-after").getAttribute("src");
+    await page.locator(".thumb-card").nth(1).locator(".thumb-img").click();
+    await expect(page.locator(".preview p")).toContainText("photo-2", { timeout: 15_000 });
+    // Back to the first image: the cache must hand back the SAME blob URL
+    // instantly instead of recompressing.
+    await page.locator(".thumb-card").nth(0).locator(".thumb-img").click();
+    await expect(page.locator(".preview p")).toContainText("photo-1");
+    expect(await page.locator(".preview-after").getAttribute("src")).toBe(src1);
+  });
+
   test("Clear removes files, thumbnails AND the preview (regression)", async ({ page }) => {
     await page.setInputFiles("#file-in", pngFiles(2));
     await expect(page.locator(".thumb-card")).toHaveCount(2);

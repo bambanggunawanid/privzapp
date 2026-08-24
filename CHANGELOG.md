@@ -93,6 +93,13 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
   "3,1,2" text input is gone).
 
 ### Added
+- Compress Image: Resolution control (10–100% of the original, ±10
+  buttons) — downscaling is the biggest size lever once quality has
+  done its part; the filename keeps the original name.
+- Live previews are cached in memory per image + settings, so switching
+  between thumbnails is instant instead of recompressing every click.
+  Deliberately not persisted across refreshes: uploads never touch
+  storage, and neither do results — nothing is left behind.
 - Compress/Convert Image: before/after comparison panes; click any
   thumbnail to pick which image the live preview shows.
 - Compress Image now genuinely shrinks PNGs at lower quality: palette
