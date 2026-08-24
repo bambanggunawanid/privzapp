@@ -1,0 +1,11 @@
+[application]
+
+[bundle]
+identifier = "app.privzapp"
+publisher = "PrivZapp"
+
+[web.app]
+title = "PrivZapp — private, in-browser file tools"
+
+[web.watcher]
+watch_path = ["src", "assets"]

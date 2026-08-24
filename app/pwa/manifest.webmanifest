@@ -1,0 +1,16 @@
+{
+  "name": "PrivZapp — private file tools",
+  "short_name": "PrivZapp",
+  "description": "Merge PDFs, convert images, compress anything — entirely on your device. No uploads, ever.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b0e14",
+  "theme_color": "#0b0e14",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
