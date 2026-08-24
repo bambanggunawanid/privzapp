@@ -1,0 +1,5 @@
+#!/bin/sh
+# Blocks commits containing credentials — this repo is public.
+# Installed via: git config core.hooksPath .githooks  (see README).
+# Secrets belong in .env (gitignored); template in .env.example.
+exec python3 "$(git rev-parse --show-toplevel)/scripts/check-secrets.py" --staged

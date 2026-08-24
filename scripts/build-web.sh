@@ -5,6 +5,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Local config/secrets live in .env (gitignored; template: .env.example).
+if [[ -f .env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+
 (cd app && dx build --platform web --release)
 
 # dx emits the static site under target/dx/<app>/release/web/public.

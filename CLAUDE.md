@@ -42,8 +42,16 @@ crates that compile to both native and wasm32.
 
 ## Commands
 
-- Everything CI runs: `./scripts/verify.sh` (fmt --check, clippy -D
-  warnings, workspace tests, wasm32 check). Run it before every commit.
+- Everything CI runs: `./scripts/verify.sh` (secret scan, fmt --check,
+  clippy -D warnings, workspace tests, wasm32 check). Run it before every
+  commit.
+- Secrets: the repo is public. Never hardcode credentials — they go in
+  `.env` (gitignored, template `.env.example`). `.githooks/pre-commit`
+  (installed via `git config core.hooksPath .githooks`) and the verify
+  script both run `scripts/check-secrets.py`; avoid scanner-bait patterns
+  like `password: "..."` (a quoted literal) even in tests (build test
+  passphrases with
+  `join()` — see pz-engine). Commits carry NO Co-Authored-By/AI trailer.
 - Wasm check alone (the important one):
   `cargo check -p privzapp --target wasm32-unknown-unknown`
 - Dev server: `cd app && dx serve --platform web`

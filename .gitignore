@@ -2,3 +2,8 @@
 /dist
 .DS_Store
 *.log
+
+# Secrets/config — never committed (template: .env.example)
+.env
+.env.*
+!.env.example

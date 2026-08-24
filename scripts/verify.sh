@@ -3,6 +3,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+echo "==> secret scan (public repo: no credentials in tracked files)"
+python3 scripts/check-secrets.py --all
+
 echo "==> cargo fmt --check"
 cargo fmt --all -- --check
 

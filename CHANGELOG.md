@@ -8,6 +8,10 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
 ## [Unreleased]
 
 ### Added
+- Pre-commit secret guard: `.githooks/pre-commit` + `scripts/check-secrets.py`
+  block credentials, key files and `.env` from ever being committed (the
+  repo is public); the same scan runs in `verify.sh`/CI. Secrets belong in
+  `.env` (gitignored, sourced by `build-web.sh`; template `.env.example`).
 - **PDF editor** (30 tools total): draw and sign by hand with a brush
   (pressure-thinned vector ink, color/size controls), stamp images by
   dragging a rectangle, undo, then bake everything into the PDF on-device.

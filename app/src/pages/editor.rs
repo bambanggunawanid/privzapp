@@ -667,7 +667,7 @@ pub fn EditorPage() -> Element {
                             }
                             input {
                                 r#type: "password",
-                                placeholder: "Password (optional)",
+                                placeholder: "•••••••• (optional)",
                                 value: "{export_pw}",
                                 oninput: move |evt| export_pw.set(evt.value()),
                             }

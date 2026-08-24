@@ -66,7 +66,11 @@ registered tool is missing from this table — the docs can't silently rot.
 ## Development
 
 ```bash
-# Everything CI runs: fmt, clippy -D warnings, tests, wasm32 check
+# One-time after cloning: pre-commit secret guard (this repo is public —
+# credentials never go in code; put them in .env, template in .env.example)
+git config core.hooksPath .githooks
+
+# Everything CI runs: secret scan, fmt, clippy -D warnings, tests, wasm32 check
 ./scripts/verify.sh
 
 # Web (dev server with hot reload; PWA bits are release-only)
