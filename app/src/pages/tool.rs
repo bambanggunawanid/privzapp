@@ -80,15 +80,18 @@ pub fn ToolPage(slug: String) -> Element {
     };
 
     // Live before/after preview for the lossy image tools: re-runs the
-    // engine on the first file whenever quality/format changes.
+    // engine on the *selected* file (click a thumbnail to pick) whenever
+    // quality/format changes.
     let has_preview = matches!(meta.slug, "compress-img" | "convert-img");
+    let mut preview_idx = use_signal(|| 0usize);
     let mut preview_url = use_signal(|| Option::<String>::None);
     let mut preview_note = use_signal(String::new);
     let mut refresh_preview = move || {
         if !has_preview {
             return;
         }
-        let Some(f) = files.read().first().cloned() else {
+        let idx = preview_idx().min(files.read().len().saturating_sub(1));
+        let Some(f) = files.read().get(idx).cloned() else {
             if let Some(old) = preview_url() {
                 crate::save::revoke_object_url(&old);
             }
@@ -238,9 +241,22 @@ pub fn ToolPage(slug: String) -> Element {
                     // can verify what actually got picked.
                     div { class: "thumb-grid",
                         for (i, f) in files.read().iter().enumerate() {
-                            div { class: "thumb-card", key: "{i}-{f.name}",
+                            div {
+                                class: if has_preview && preview_idx().min(files.read().len() - 1) == i { "thumb-card selected" } else { "thumb-card" },
+                                key: "{i}-{f.name}",
                                 if let Some(Some(url)) = thumbs.read().get(i) {
-                                    img { class: "thumb-img", src: "{url}", alt: "{f.name}" }
+                                    // Click an image to make it the preview target.
+                                    img {
+                                        class: "thumb-img",
+                                        src: "{url}",
+                                        alt: "{f.name}",
+                                        onclick: move |_| {
+                                            if has_preview {
+                                                preview_idx.set(i);
+                                                refresh_preview();
+                                            }
+                                        },
+                                    }
                                 } else {
                                     div { class: "thumb-img thumb-generic", "📄" }
                                 }
@@ -529,9 +545,29 @@ pub fn ToolPage(slug: String) -> Element {
             }
 
             if has_preview && !preview_note.read().is_empty() {
+                // Side-by-side comparison of the selected image.
                 div { class: "preview",
-                    if let Some(url) = preview_url() {
-                        img { src: "{url}", alt: "Result preview" }
+                    div { class: "preview-compare",
+                        div { class: "preview-pane",
+                            span { class: "muted small",
+                                "Original — "
+                                {
+                                    let idx = preview_idx().min(files.read().len().saturating_sub(1));
+                                    files.read().get(idx).map(|f| human_size(f.bytes.len())).unwrap_or_default()
+                                }
+                            }
+                            if let Some(Some(url)) = thumbs.read().get(preview_idx().min(thumbs.read().len().saturating_sub(1))) {
+                                img { class: "preview-before", src: "{url}", alt: "Original" }
+                            } else {
+                                div { class: "thumb-img thumb-generic", "📄" }
+                            }
+                        }
+                        div { class: "preview-pane",
+                            span { class: "muted small", "After (live)" }
+                            if let Some(url) = preview_url() {
+                                img { class: "preview-after", src: "{url}", alt: "Result preview" }
+                            }
+                        }
                     }
                     p { class: "muted small", "{preview_note}" }
                 }

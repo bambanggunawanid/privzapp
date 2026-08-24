@@ -783,24 +783,28 @@ pub struct PlacedRect {
 }
 
 /// A JPEG placed on a page. `rect` is (x, y, width, height) in PDF points,
-/// with y the *bottom* edge of the image.
+/// with y the *bottom* edge of the image. `opacity` below 1.0 draws the
+/// image translucent (Normal blend).
 #[derive(Debug, Clone)]
 pub struct PlacedJpeg {
     pub jpeg: Vec<u8>,
     pub width_px: u32,
     pub height_px: u32,
     pub rect: (f32, f32, f32, f32),
+    pub opacity: f32,
 }
 
 /// A typed text box. `pos` is the baseline start of the first line in PDF
 /// points (origin bottom-left); newlines produce extra lines at 1.25×
-/// leading. Rendered in Helvetica (WinAnsi — non-Latin-1 chars become '?').
+/// leading. Rendered in Helvetica, bold when `bold` (WinAnsi —
+/// non-Latin-1 chars become '?').
 #[derive(Debug, Clone)]
 pub struct PlacedText {
     pub text: String,
     pub size: f32,
     pub color: (u8, u8, u8),
     pub pos: (f32, f32),
+    pub bold: bool,
 }
 
 /// Everything the editor drew on one page. Paint order: rects (white-out,
@@ -829,6 +833,11 @@ pub fn annotate(name: &str, bytes: &[u8], edits: &[PageEdits]) -> Result<OutputF
         "Subtype" => "Type1",
         "BaseFont" => "Helvetica",
     });
+    let bold_font_id = doc.add_object(dictionary! {
+        "Type" => "Font",
+        "Subtype" => "Type1",
+        "BaseFont" => "Helvetica-Bold",
+    });
 
     for edit in edits {
         if edit.strokes.is_empty()
@@ -846,9 +855,11 @@ pub fn annotate(name: &str, bytes: &[u8], edits: &[PageEdits]) -> Result<OutputF
         };
         applied = true;
 
-        // One ExtGState per distinct sub-1 stroke opacity on this page
-        // (Multiply blend so highlighter ink keeps text readable).
+        // One ExtGState per distinct sub-1 opacity on this page: strokes
+        // use a Multiply blend (highlighter keeps text readable), images
+        // a Normal blend.
         let mut gstates: Vec<(u16, String)> = Vec::new();
+        let mut img_gstates: Vec<(u16, String)> = Vec::new();
         for stroke in &edit.strokes {
             let key = (stroke.opacity.clamp(0.0, 1.0) * 1000.0) as u16;
             if key < 1000 && !gstates.iter().any(|(k, _)| *k == key) {
@@ -861,6 +872,19 @@ pub fn annotate(name: &str, bytes: &[u8], edits: &[PageEdits]) -> Result<OutputF
                 });
                 add_page_resource(&mut doc, page_id, "ExtGState", &res_name, gs_id)?;
                 gstates.push((key, res_name));
+            }
+        }
+        for img in &edit.images {
+            let key = (img.opacity.clamp(0.0, 1.0) * 1000.0) as u16;
+            if key < 1000 && !img_gstates.iter().any(|(k, _)| *k == key) {
+                let res_name = format!("PZga{key}");
+                let gs_id = doc.add_object(dictionary! {
+                    "Type" => "ExtGState",
+                    "CA" => f32::from(key) / 1000.0,
+                    "ca" => f32::from(key) / 1000.0,
+                });
+                add_page_resource(&mut doc, page_id, "ExtGState", &res_name, gs_id)?;
+                img_gstates.push((key, res_name));
             }
         }
 
@@ -902,6 +926,13 @@ pub fn annotate(name: &str, bytes: &[u8], edits: &[PageEdits]) -> Result<OutputF
             add_page_resource(&mut doc, page_id, "XObject", &res_name, img_id)?;
             let (x, y, w, h) = img.rect;
             ops.push(Operation::new("q", vec![]));
+            let key = (img.opacity.clamp(0.0, 1.0) * 1000.0) as u16;
+            if let Some((_, gs)) = img_gstates.iter().find(|(k, _)| *k == key) {
+                ops.push(Operation::new(
+                    "gs",
+                    vec![Object::Name(gs.clone().into_bytes())],
+                ));
+            }
             ops.push(Operation::new(
                 "cm",
                 vec![w.into(), 0.into(), 0.into(), h.into(), x.into(), y.into()],
@@ -912,8 +943,11 @@ pub fn annotate(name: &str, bytes: &[u8], edits: &[PageEdits]) -> Result<OutputF
             ));
             ops.push(Operation::new("Q", vec![]));
         }
-        if !edit.texts.is_empty() {
+        if edit.texts.iter().any(|t| !t.bold) {
             add_page_resource(&mut doc, page_id, "Font", "PZtx", font_id)?;
+        }
+        if edit.texts.iter().any(|t| t.bold) {
+            add_page_resource(&mut doc, page_id, "Font", "PZtxb", bold_font_id)?;
         }
         for txt in &edit.texts {
             if txt.text.trim().is_empty() {
@@ -921,9 +955,10 @@ pub fn annotate(name: &str, bytes: &[u8], edits: &[PageEdits]) -> Result<OutputF
             }
             let (r, g, b) = txt.color;
             let size = txt.size.clamp(4.0, 144.0);
+            let font_name = if txt.bold { "PZtxb" } else { "PZtx" };
             ops.push(Operation::new("q", vec![]));
             ops.push(Operation::new("BT", vec![]));
-            ops.push(Operation::new("Tf", vec!["PZtx".into(), size.into()]));
+            ops.push(Operation::new("Tf", vec![font_name.into(), size.into()]));
             ops.push(Operation::new("TL", vec![(size * 1.25).into()]));
             ops.push(Operation::new(
                 "rg",
@@ -1301,12 +1336,14 @@ mod tests {
                 width_px: 20,
                 height_px: 20,
                 rect: (300.0, 500.0, 80.0, 80.0),
+                opacity: 0.8,
             }],
             texts: vec![PlacedText {
                 text: "Reviewed by QA\nDept. 7".into(),
                 size: 14.0,
                 color: (200, 30, 30),
                 pos: (72.0, 700.0),
+                bold: true,
             }],
             rects: vec![],
         }];
@@ -1357,6 +1394,7 @@ mod tests {
                 size: 11.0,
                 color: (0, 0, 0),
                 pos: (80.0, 500.0),
+                bold: false,
             }],
             rects: vec![PlacedRect {
                 rect: (78.0, 496.0, 120.0, 16.0),

@@ -2,6 +2,7 @@
 // owner reported broken at least once — keep them green.
 import { test, expect } from "@playwright/test";
 import { samplePdf } from "./fixtures/sample-pdf.mjs";
+import { samplePng } from "./fixtures/sample-png.mjs";
 
 async function gotoEditor(page) {
   await page.goto("/tool/edit-pdf/");
@@ -102,6 +103,58 @@ test.describe("editor workspace", () => {
     // A white-out rect now covers the original.
     const rects = await page.evaluate(() => (window.pzEd.rects[1] || []).length);
     expect(rects).toBe(1);
+    // Style inheritance (regression: retype used to reset the style):
+    // the fixture text is regular black, so the box must be near-black
+    // and normal weight — not restyled.
+    const style = await textBox.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { color: s.color, weight: s.fontWeight };
+    });
+    const rgb = style.color.match(/\d+/g).map(Number);
+    for (const ch of rgb.slice(0, 3)) expect(ch).toBeLessThan(110);
+    expect(["400", "normal"]).toContain(style.weight);
+  });
+
+  test("inserted image is a live object: lands at source size, drags, resizes, deletes", async ({ page }) => {
+    await openPdf(page);
+    await page.setInputFiles("#img-in", {
+      name: "stamp.png",
+      mimeType: "image/png",
+      buffer: samplePng(),
+    });
+    // Placed immediately — no rectangle-drawing step.
+    const img = page.locator(".pz-img").first();
+    await expect(img).toBeVisible({ timeout: 15_000 });
+    const rec = await page.evaluate(() => {
+      const r = window.pzEd.images[1][0];
+      return { x: r.x, w: r.w, h: r.h, opacity: r.opacity };
+    });
+    expect(rec.w).toBeGreaterThan(16);
+    expect(rec.opacity).toBe(1);
+
+    // Drag moves it.
+    const bb = await img.boundingBox();
+    await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(bb.x + bb.width / 2 + 90, bb.y + bb.height / 2 + 40, { steps: 5 });
+    await page.mouse.up();
+    const movedX = await page.evaluate(() => window.pzEd.images[1][0].x);
+    expect(movedX).toBeGreaterThan(rec.x + 50);
+
+    // Per-object opacity.
+    await page.locator(".pz-obj-opacity").evaluate((el) => {
+      el.value = 50;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(await page.evaluate(() => window.pzEd.images[1][0].opacity)).toBeCloseTo(0.5, 5);
+
+    // ✕ deletes; Ctrl+Z brings it back.
+    await img.hover();
+    await page.locator(".pz-obj-del").click();
+    await expect(page.locator(".pz-img")).toHaveCount(0);
+    await page.locator(".ed-canvas").click({ position: { x: 30, y: 30 } });
+    await page.keyboard.press("Control+z");
+    await expect(page.locator(".pz-img")).toHaveCount(1);
   });
 
   test("highlighter draws translucent yellow strokes", async ({ page }) => {

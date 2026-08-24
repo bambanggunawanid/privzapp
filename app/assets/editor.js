@@ -23,16 +23,15 @@ window.pzEd = {
   pages: [], // 1-based: {wrap, canvas, under, uctx, overlay, ctx, scale, fitScale, pdfW, pdfH}
   tool: { mode: "cursor", color: "#1130cc", size: 3, opacity: 1 },
   strokes: {}, // page -> [{color,size,opacity,points:[[x,y],…]}] overlay px
-  images: {}, // page -> [{id,x,y,w,h}] overlay px
-  texts: {}, // page -> [{el,x,y,size,color}] top-left overlay px
+  images: {}, // page -> [{el,id,x,y,w,h,opacity}] live DOM objects, overlay px
+  texts: {}, // page -> [{el,x,y,size,color,bold}] top-left overlay px
   rects: {}, // page -> [{x,y,w,h,spanEl}] white-outs, overlay px
-  bitmaps: {}, // image id -> ImageBitmap (preview only)
-  staged: null, // image id waiting for placement
-  history: [], // [{type:'stroke'|'image'|'text'|'retype', page, obj?}]
+  history: [], // [{type:'stroke'|'image'|'image-del'|'text'|'retype', page, obj?}]
   redo: [], // popped history entries with payloads
   zoom: 1, // 1 = fit-width; survives re-opens so operations keep your view
   zooming: false,
   dragThumb: null,
+  current: 1, // page nearest the viewport center (image placement target)
 };
 
 async function pzInit(pdfjsUrl, workerUrl) {
@@ -69,10 +68,9 @@ async function pzOpenParams(params) {
   E.images = {};
   E.texts = {};
   E.rects = {};
-  E.bitmaps = {};
   E.history = [];
   E.redo = [];
-  E.staged = null;
+  E.current = 1;
   const container = document.getElementById("pz-pages");
   container.innerHTML = "";
   const thumbs = document.getElementById("pz-thumbs");
@@ -265,6 +263,7 @@ function pzTrackPage(sc) {
     const p = E.pages[n];
     if (p && p.wrap.getBoundingClientRect().top <= mid) current = n;
   }
+  E.current = current;
   pzIndicate(current, E.doc ? E.doc.numPages : 0);
 }
 
@@ -397,6 +396,10 @@ async function pzZoom(action) {
         im.y *= ratio;
         im.w *= ratio;
         im.h *= ratio;
+        im.el.style.left = im.x + "px";
+        im.el.style.top = im.y + "px";
+        im.el.style.width = im.w + "px";
+        im.el.style.height = im.h + "px";
       }
       for (const r of E.rects[n] || []) {
         r.x *= ratio;
@@ -443,19 +446,16 @@ function pzPushHistory(entry) {
   E.redo = [];
 }
 
-// Drawing tools (pen/highlight/image) — pointer events on the top overlay.
+// Drawing tools (pen/highlight) — pointer events on the top overlay.
 function pzHook(overlay, n) {
   const E = window.pzEd;
   let stroke = null;
-  let rectStart = null;
 
   overlay.addEventListener("pointerdown", (ev) => {
     ev.preventDefault();
     overlay.setPointerCapture(ev.pointerId);
     const [x, y] = pzPos(overlay, ev);
-    if (E.tool.mode === "image" && E.staged) {
-      rectStart = [x, y];
-    } else if (E.tool.mode === "pen" || E.tool.mode === "highlight") {
+    if (E.tool.mode === "pen" || E.tool.mode === "highlight") {
       stroke = {
         color: E.tool.color,
         size: E.tool.size,
@@ -466,78 +466,35 @@ function pzHook(overlay, n) {
   });
 
   overlay.addEventListener("pointermove", (ev) => {
+    if (!stroke) return;
     const [x, y] = pzPos(overlay, ev);
-    if (stroke) {
-      const pts = stroke.points;
-      const [lx, ly] = pts[pts.length - 1];
-      if ((x - lx) ** 2 + (y - ly) ** 2 < 4) return; // thin out points
-      pts.push([x, y]);
-      const ctx = E.pages[n].ctx;
-      ctx.save();
-      ctx.globalAlpha = stroke.opacity;
-      ctx.strokeStyle = stroke.color;
-      ctx.lineWidth = stroke.size;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(lx, ly);
-      ctx.lineTo(x, y);
-      ctx.stroke();
-      ctx.restore();
-    } else if (rectStart) {
-      pzRedraw(n);
-      const ctx = E.pages[n].ctx;
-      ctx.save();
-      ctx.strokeStyle = "#6c8cff";
-      ctx.setLineDash([6, 4]);
-      ctx.strokeRect(
-        rectStart[0],
-        rectStart[1],
-        x - rectStart[0],
-        y - rectStart[1],
-      );
-      ctx.restore();
-    }
+    const pts = stroke.points;
+    const [lx, ly] = pts[pts.length - 1];
+    if ((x - lx) ** 2 + (y - ly) ** 2 < 4) return; // thin out points
+    pts.push([x, y]);
+    const ctx = E.pages[n].ctx;
+    ctx.save();
+    ctx.globalAlpha = stroke.opacity;
+    ctx.strokeStyle = stroke.color;
+    ctx.lineWidth = stroke.size;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(lx, ly);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.restore();
   });
 
-  const finish = (ev) => {
-    const [x, y] = pzPos(overlay, ev);
-    if (stroke) {
-      (E.strokes[n] = E.strokes[n] || []).push(stroke);
-      pzPushHistory({ type: "stroke", page: n });
-      pzRedraw(n);
-      stroke = null;
-    } else if (rectStart) {
-      let [x0, y0] = rectStart;
-      let w = x - x0;
-      let h = y - y0;
-      if (w < 0) {
-        x0 += w;
-        w = -w;
-      }
-      if (h < 0) {
-        y0 += h;
-        h = -h;
-      }
-      if (w > 8 && h > 8) {
-        (E.images[n] = E.images[n] || []).push({
-          id: E.staged,
-          x: x0,
-          y: y0,
-          w,
-          h,
-        });
-        pzPushHistory({ type: "image", page: n });
-        E.staged = null;
-        pzSetTool("cursor", E.tool.color, E.tool.size, 1);
-      }
-      rectStart = null;
-      pzRedraw(n);
-    }
+  const finish = () => {
+    if (!stroke) return;
+    (E.strokes[n] = E.strokes[n] || []).push(stroke);
+    pzPushHistory({ type: "stroke", page: n });
+    pzRedraw(n);
+    stroke = null;
   };
   overlay.addEventListener("pointerup", finish);
   overlay.addEventListener("pointercancel", () => {
     stroke = null;
-    rectStart = null;
   });
 }
 
@@ -580,8 +537,9 @@ function pzMakeText(n, x, y, opts) {
   el.style.top = y + "px";
   el.style.fontSize = opts.size + "px";
   el.style.color = opts.color;
+  if (opts.bold) el.style.fontWeight = "bold";
   el.textContent = opts.text || "";
-  const rec = { el, x, y, size: opts.size, color: opts.color };
+  const rec = { el, x, y, size: opts.size, color: opts.color, bold: !!opts.bold };
   el.addEventListener("blur", () => {
     if (!el.innerText.trim()) pzRemoveText(n, rec, true);
   });
@@ -631,8 +589,71 @@ function pzTextPointer(ev, n, rec) {
   window.addEventListener("pointerup", onUp);
 }
 
+// The source text's color, sampled from the rendered pixels under the
+// span: the most frequent color bucket is the background; the answer is
+// the average of pixels far from it. Editing must not restyle the text.
+function pzSampleTextColor(p, x, y, w, h) {
+  try {
+    const sx = Math.max(0, Math.round(x));
+    const sy = Math.max(0, Math.round(y));
+    const sw = Math.min(p.canvas.width - sx, Math.max(1, Math.round(w)));
+    const sh = Math.min(p.canvas.height - sy, Math.max(1, Math.round(h)));
+    if (sw < 2 || sh < 2) return "#000000";
+    const data = p.canvas.getContext("2d").getImageData(sx, sy, sw, sh).data;
+    const buckets = new Map();
+    for (let i = 0; i < data.length; i += 4) {
+      const key = ((data[i] >> 4) << 8) | ((data[i + 1] >> 4) << 4) | (data[i + 2] >> 4);
+      buckets.set(key, (buckets.get(key) || 0) + 1);
+    }
+    let bg = 0xfff;
+    let max = -1;
+    for (const [k, c] of buckets) {
+      if (c > max) {
+        max = c;
+        bg = k;
+      }
+    }
+    const bgc = [((bg >> 8) & 15) * 17, ((bg >> 4) & 15) * 17, (bg & 15) * 17];
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    let count = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const d =
+        Math.abs(data[i] - bgc[0]) +
+        Math.abs(data[i + 1] - bgc[1]) +
+        Math.abs(data[i + 2] - bgc[2]);
+      if (d > 120) {
+        r += data[i];
+        g += data[i + 1];
+        b += data[i + 2];
+        count++;
+      }
+    }
+    if (!count) return "#000000";
+    const hex = (v) => Math.round(v / count).toString(16).padStart(2, "0");
+    return "#" + hex(r) + hex(g) + hex(b);
+  } catch (e) {
+    return "#000000";
+  }
+}
+
+// Bold if the span's real advance width is closer to bold metrics than
+// regular ones.
+function pzGuessBold(text, fs, targetW) {
+  if (!text.trim() || targetW < 4) return false;
+  const c = document.createElement("canvas").getContext("2d");
+  c.font = fs + "px Helvetica, Arial, sans-serif";
+  const wn = c.measureText(text).width;
+  c.font = "bold " + fs + "px Helvetica, Arial, sans-serif";
+  const wb = c.measureText(text).width;
+  return Math.abs(wb - targetW) < Math.abs(wn - targetW);
+}
+
 // Cover & retype: white-out the detected text and drop an editable box
-// with the same content on top. Works best on white backgrounds.
+// with the same content on top, inheriting the source style (sampled
+// color, guessed weight, span font size) — editing changes content, not
+// style. Works best on white backgrounds.
 function pzRetype(n, span) {
   const E = window.pzEd;
   const p = E.pages[n];
@@ -641,6 +662,8 @@ function pzRetype(n, span) {
   const x = sr.left - wr.left;
   const y = sr.top - wr.top;
   const fs = parseFloat(getComputedStyle(span).fontSize) || sr.height * 0.9;
+  const color = pzSampleTextColor(p, x, y, sr.width, sr.height);
+  const bold = pzGuessBold(span.textContent, fs, sr.width);
   const rect = {
     x: x - 2,
     y: y - 2,
@@ -654,7 +677,8 @@ function pzRetype(n, span) {
   const rec = pzMakeText(n, x, y, {
     text: span.textContent,
     size: fs,
-    color: "#000000",
+    color,
+    bold,
   });
   pzPushHistory({ type: "retype", page: n, obj: { box: rec, rect } });
   rec.el.focus();
@@ -666,15 +690,11 @@ function pzRetype(n, span) {
 function pzRedraw(n) {
   const E = window.pzEd;
   const p = E.pages[n];
-  // Under layer: white-outs, then image previews.
+  // Under layer: white-outs (images are live DOM objects now).
   p.uctx.clearRect(0, 0, p.under.width, p.under.height);
   for (const r of E.rects[n] || []) {
     p.uctx.fillStyle = "#ffffff";
     p.uctx.fillRect(r.x, r.y, r.w, r.h);
-  }
-  for (const im of E.images[n] || []) {
-    const bmp = E.bitmaps[im.id];
-    if (bmp) p.uctx.drawImage(bmp, im.x, im.y, im.w, im.h);
   }
   // Ink layer.
   p.ctx.clearRect(0, 0, p.overlay.width, p.overlay.height);
@@ -700,7 +720,7 @@ function pzRedraw(n) {
 function pzApplyMode() {
   const E = window.pzEd;
   const mode = E.tool.mode;
-  const drawing = mode === "pen" || mode === "highlight" || mode === "image";
+  const drawing = mode === "pen" || mode === "highlight";
   for (const p of E.pages) {
     if (p) p.overlay.style.pointerEvents = drawing ? "auto" : "none";
   }
@@ -715,26 +735,146 @@ function pzApplyMode() {
 function pzSetTool(mode, color, size, opacity) {
   const E = window.pzEd;
   E.tool = { mode, color, size, opacity: opacity == null ? 1 : opacity };
-  if (mode !== "image") E.staged = null;
   pzApplyMode();
   return true;
 }
 
+// ---- live image objects ----
+// An inserted image lands immediately at its natural size on the current
+// page, then behaves like a text box: drag to move, corner to resize,
+// per-object opacity, ✕ / Delete to remove.
+
 async function pzStageImage(id, url) {
   const blob = await (await fetch(url)).blob();
-  return pzStageBlob(id, blob);
+  return pzPlaceImage(id, blob);
 }
 
 async function pzStageImageB64(id, b64) {
-  return pzStageBlob(id, new Blob([pzB64(b64)]));
+  return pzPlaceImage(id, new Blob([pzB64(b64)]));
 }
 
-async function pzStageBlob(id, blob) {
+async function pzPlaceImage(id, blob) {
   const E = window.pzEd;
-  E.bitmaps[id] = await createImageBitmap(blob);
-  pzSetTool("image", E.tool.color, E.tool.size, 1);
-  E.staged = id;
+  const bmp = await createImageBitmap(blob);
+  const n = E.current || 1;
+  const p = E.pages[n];
+  if (!p) return false;
+  // Natural source pixels, capped to fit comfortably on the page.
+  let w = bmp.width;
+  let h = bmp.height;
+  const cap = Math.min(1, (p.overlay.width * 0.6) / w, (p.overlay.height * 0.6) / h);
+  w *= cap;
+  h *= cap;
+  const x = (p.overlay.width - w) / 2;
+  const y = Math.max(12, (p.overlay.height - h) / 3);
+  const rec = pzMakeImage(n, id, URL.createObjectURL(blob), x, y, w, h);
+  pzPushHistory({ type: "image", page: n, obj: rec });
+  pzSetTool("cursor", E.tool.color, E.tool.size, 1);
+  rec.el.focus();
   return true;
+}
+
+function pzMakeImage(n, id, url, x, y, w, h) {
+  const E = window.pzEd;
+  const p = E.pages[n];
+  const el = document.createElement("div");
+  el.className = "pz-img";
+  el.tabIndex = 0;
+  el.style.left = x + "px";
+  el.style.top = y + "px";
+  el.style.width = w + "px";
+  el.style.height = h + "px";
+  const im = document.createElement("img");
+  im.src = url;
+  im.draggable = false;
+  im.alt = "";
+  const del = document.createElement("button");
+  del.className = "pz-obj-del";
+  del.textContent = "✕";
+  del.title = "Delete image";
+  const rs = document.createElement("div");
+  rs.className = "pz-obj-resize";
+  rs.title = "Resize";
+  const op = document.createElement("input");
+  op.type = "range";
+  op.min = "10";
+  op.max = "100";
+  op.value = "100";
+  op.className = "pz-obj-opacity";
+  op.title = "Opacity";
+  el.append(im, del, rs, op);
+  const rec = { el, id, x, y, w, h, opacity: 1 };
+  op.addEventListener("pointerdown", (e) => e.stopPropagation());
+  op.addEventListener("input", () => {
+    rec.opacity = op.value / 100;
+    im.style.opacity = rec.opacity;
+  });
+  del.addEventListener("pointerdown", (e) => e.stopPropagation());
+  del.addEventListener("click", () => pzDeleteImage(n, rec, true));
+  rs.addEventListener("pointerdown", (e) => pzImageResize(e, n, rec));
+  el.addEventListener("pointerdown", (e) => pzImagePointer(e, n, rec));
+  el.addEventListener("keydown", (e) => {
+    if (e.key === "Delete" || e.key === "Backspace") {
+      e.preventDefault();
+      pzDeleteImage(n, rec, true);
+    }
+  });
+  p.wrap.insertBefore(el, p.overlay);
+  (E.images[n] = E.images[n] || []).push(rec);
+  return rec;
+}
+
+function pzDeleteImage(n, rec, hist) {
+  const E = window.pzEd;
+  rec.el.remove();
+  const arr = E.images[n] || [];
+  const i = arr.indexOf(rec);
+  if (i >= 0) arr.splice(i, 1);
+  if (hist) pzPushHistory({ type: "image-del", page: n, obj: rec });
+}
+
+function pzImagePointer(ev, n, rec) {
+  const E = window.pzEd;
+  if (E.tool.mode !== "cursor" && E.tool.mode !== "text") return;
+  ev.preventDefault();
+  rec.el.focus();
+  const startX = ev.clientX;
+  const startY = ev.clientY;
+  const origX = rec.x;
+  const origY = rec.y;
+  const onMove = (mv) => {
+    rec.x = origX + (mv.clientX - startX);
+    rec.y = origY + (mv.clientY - startY);
+    rec.el.style.left = rec.x + "px";
+    rec.el.style.top = rec.y + "px";
+  };
+  const onUp = () => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+}
+
+function pzImageResize(ev, n, rec) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  const startX = ev.clientX;
+  const startY = ev.clientY;
+  const origW = rec.w;
+  const origH = rec.h;
+  const onMove = (mv) => {
+    rec.w = Math.max(16, origW + (mv.clientX - startX));
+    rec.h = Math.max(16, origH + (mv.clientY - startY));
+    rec.el.style.width = rec.w + "px";
+    rec.el.style.height = rec.h + "px";
+  };
+  const onUp = () => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
 }
 
 // ---- undo / redo ----
@@ -748,8 +888,12 @@ function pzUndo() {
     const obj = (E.strokes[n] || []).pop();
     E.redo.push({ ...last, payload: obj });
   } else if (last.type === "image") {
-    const obj = (E.images[n] || []).pop();
-    E.redo.push({ ...last, payload: obj });
+    pzDeleteImage(n, last.obj, false);
+    E.redo.push(last);
+  } else if (last.type === "image-del") {
+    E.pages[n].wrap.insertBefore(last.obj.el, E.pages[n].overlay);
+    (E.images[n] = E.images[n] || []).push(last.obj);
+    E.redo.push(last);
   } else if (last.type === "text") {
     pzRemoveText(n, last.obj, false);
     E.redo.push(last);
@@ -774,8 +918,12 @@ function pzRedo() {
     (E.strokes[n] = E.strokes[n] || []).push(last.payload);
     E.history.push({ type: "stroke", page: n });
   } else if (last.type === "image") {
-    (E.images[n] = E.images[n] || []).push(last.payload);
-    E.history.push({ type: "image", page: n });
+    E.pages[n].wrap.insertBefore(last.obj.el, E.pages[n].overlay);
+    (E.images[n] = E.images[n] || []).push(last.obj);
+    E.history.push(last);
+  } else if (last.type === "image-del") {
+    pzDeleteImage(n, last.obj, false);
+    E.history.push(last);
   } else if (last.type === "text") {
     const rec = last.obj;
     E.pages[n].wrap.insertBefore(rec.el, E.pages[n].overlay);
@@ -810,6 +958,7 @@ function pzExport() {
     }));
     const images = (E.images[n] || []).map((im) => ({
       id: im.id,
+      opacity: im.opacity == null ? 1 : im.opacity,
       rect: [
         im.x / p.scale,
         p.pdfH - (im.y + im.h) / p.scale,
@@ -823,6 +972,7 @@ function pzExport() {
         text: t.el.innerText.replace(/\n+$/, ""),
         color: t.color,
         size: t.size / p.scale,
+        bold: !!t.bold,
         x: t.x / p.scale,
         y: p.pdfH - (t.y + t.size * 0.85) / p.scale,
       }));

@@ -4281,6 +4281,7 @@ name = "pz-img"
 version = "0.1.0"
 dependencies = [
  "ab_glyph",
+ "color_quant",
  "image",
  "pz-core",
 ]

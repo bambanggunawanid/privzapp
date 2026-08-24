@@ -7,6 +7,9 @@ license.workspace = true
 [dependencies]
 pz-core = { workspace = true }
 image = { workspace = true }
+# PNG "quality": NeuQuant palette reduction (pure Rust, wasm-safe,
+# already in the tree via image).
+color_quant = "1.1"
 
 # Text rasterization for the image watermark tool (pure Rust, wasm-safe).
 [dependencies.ab_glyph]

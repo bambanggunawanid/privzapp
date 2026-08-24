@@ -51,6 +51,48 @@ fn decode(bytes: &[u8]) -> Result<(DynamicImage, ImageFormat), PzError> {
 }
 
 /// Encode `img` as `fmt`. `quality` only affects lossy encoders (JPEG).
+/// Lossy PNG for the compress/convert tools ONLY (geometry ops like
+/// flip/rotate must stay lossless): encodes both the lossless original
+/// and a palette-quantized version, returning whichever is smaller —
+/// quantization wins on graphics/photos, lossless wins on smooth
+/// synthetic gradients.
+fn encode_png_best(img: &DynamicImage, quality: u8) -> Result<Vec<u8>, PzError> {
+    let lossless = encode(img, ImageFormat::Png, 100)?;
+    if quality >= 100 {
+        return Ok(lossless);
+    }
+    let quantized = encode(
+        &DynamicImage::ImageRgba8(quantize_rgba(&img.to_rgba8(), quality)),
+        ImageFormat::Png,
+        100,
+    )?;
+    Ok(if quantized.len() < lossless.len() {
+        quantized
+    } else {
+        lossless
+    })
+}
+
+/// Reduce an image to a quality-scaled palette (16–256 colors) so the
+/// PNG deflate stage has something to bite on. Colors are memoized per
+/// unique input pixel, so graphics/screenshots quantize in ~O(unique).
+fn quantize_rgba(rgba: &image::RgbaImage, quality: u8) -> image::RgbaImage {
+    use std::collections::HashMap;
+    let colors = (usize::from(quality.max(1)) * 256 / 100).clamp(16, 256);
+    let nq = color_quant::NeuQuant::new(10, colors, rgba.as_raw());
+    let palette = nq.color_map_rgba();
+    let mut memo: HashMap<[u8; 4], [u8; 4]> = HashMap::new();
+    let mut out = rgba.clone();
+    for px in out.pixels_mut() {
+        let mapped = *memo.entry(px.0).or_insert_with(|| {
+            let i = nq.index_of(&px.0) * 4;
+            [palette[i], palette[i + 1], palette[i + 2], palette[i + 3]]
+        });
+        px.0 = mapped;
+    }
+    out
+}
+
 fn encode(img: &DynamicImage, fmt: ImageFormat, quality: u8) -> Result<Vec<u8>, PzError> {
     let quality = quality.clamp(1, 100);
     let mut buf = Cursor::new(Vec::new());
@@ -86,7 +128,10 @@ pub fn convert(name: &str, bytes: &[u8], target: &str, quality: u8) -> Result<Ou
     let fmt = fmt_for_ext(target)
         .ok_or_else(|| PzError::Unsupported(format!("unknown target format \"{target}\"")))?;
     let (img, _) = decode(bytes)?;
-    let out = encode(&img, fmt, quality)?;
+    let out = match fmt {
+        ImageFormat::Png => encode_png_best(&img, quality)?,
+        _ => encode(&img, fmt, quality)?,
+    };
     let (ext, mime) = ext_mime(fmt);
     Ok(OutputFile {
         name: format!("{}.{ext}", stem(name)),
@@ -432,7 +477,10 @@ fn width_ratio(w: u32, h: u32) -> f64 {
 /// quality slider applies; PNG gets max lossless compression.
 pub fn compress(name: &str, bytes: &[u8], quality: u8) -> Result<OutputFile, PzError> {
     let (img, fmt) = decode(bytes)?;
-    let out = encode(&img, fmt, quality)?;
+    let out = match fmt {
+        ImageFormat::Png => encode_png_best(&img, quality)?,
+        _ => encode(&img, fmt, quality)?,
+    };
     let (ext, mime) = ext_mime(fmt);
     // Never hand back a bigger file than the original.
     let (final_bytes, note) = if out.len() < bytes.len() {
@@ -488,6 +536,31 @@ mod tests {
         let src = sample_png();
         let out = compress("photo.png", &src, 80).unwrap();
         assert!(out.bytes.len() <= src.len());
+    }
+
+    #[test]
+    fn compress_png_quality_actually_shrinks() {
+        // Pseudo-noise: lossless PNG stays big, a 20%-quality palette
+        // compresses far better — quality must actually shrink the file.
+        let img = DynamicImage::ImageRgba8(image::RgbaImage::from_fn(128, 128, |x, y| {
+            // Avalanche mix → true-ish noise (incompressible losslessly).
+            let mut h = x.wrapping_mul(2654435761) ^ y.wrapping_mul(2246822519);
+            h ^= h >> 15;
+            h = h.wrapping_mul(2246822519);
+            h ^= h >> 13;
+            image::Rgba([h as u8, (h >> 8) as u8, (h >> 16) as u8, 255])
+        }));
+        let mut buf = Cursor::new(Vec::new());
+        img.write_to(&mut buf, ImageFormat::Png).unwrap();
+        let src = buf.into_inner();
+        let hi = compress("c.png", &src, 100).unwrap();
+        let lo = compress("c.png", &src, 20).unwrap();
+        assert!(
+            lo.bytes.len() < hi.bytes.len(),
+            "q20 ({}) should be smaller than q100 ({})",
+            lo.bytes.len(),
+            hi.bytes.len()
+        );
     }
 
     #[test]

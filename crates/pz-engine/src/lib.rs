@@ -275,6 +275,7 @@ pub use pz_pdf::{PlacedRect, PlacedText, Stroke};
 pub struct EditImage {
     pub bytes: Vec<u8>,
     pub rect: (f32, f32, f32, f32),
+    pub opacity: f32,
 }
 
 /// One page's worth of editor annotations.
@@ -309,6 +310,7 @@ pub fn edit_pdf(
                     width_px,
                     height_px,
                     rect: im.rect,
+                    opacity: im.opacity,
                 })
             })
             .collect::<Result<Vec<_>, PzError>>()?;

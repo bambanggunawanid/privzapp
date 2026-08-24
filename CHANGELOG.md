@@ -92,7 +92,22 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
 - Reorder pages by dragging thumbnails in the left rail (the old
   "3,1,2" text input is gone).
 
+### Added
+- Compress/Convert Image: before/after comparison panes; click any
+  thumbnail to pick which image the live preview shows.
+- Compress Image now genuinely shrinks PNGs at lower quality: palette
+  quantization (NeuQuant) with an automatic keep-the-smaller fallback,
+  so quality can never make a file bigger.
+- Editor images are live objects: inserting places the image at its
+  natural size on the current page — drag to move, corner handle to
+  resize, per-image opacity slider (baked with real PDF transparency),
+  ✕/Delete to remove, all undoable.
+
 ### Fixed
+- Editor retype inherits the source style: clicking existing PDF text
+  now samples its color from the render and detects bold from the text
+  metrics — editing changes the content, not the look (bold bakes as
+  Helvetica-Bold).
 - Compress/Convert Image: the page froze while dragging the quality
   slider (the wasm engine recompressed on every tick, blocking the main
   thread). Dragging now only updates the number; the preview recomputes

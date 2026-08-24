@@ -97,6 +97,8 @@ struct ExportText {
     text: String,
     color: String,
     size: f32,
+    #[serde(default)]
+    bold: bool,
     x: f32,
     y: f32,
 }
@@ -118,6 +120,8 @@ struct ExportStroke {
 struct ExportImage {
     id: String,
     rect: (f32, f32, f32, f32),
+    #[serde(default = "default_opacity")]
+    opacity: f32,
 }
 
 #[derive(Deserialize)]
@@ -162,6 +166,7 @@ async fn pending_edits(attachments: &[(String, Vec<u8>)]) -> Result<Vec<PageEdit
                         .map(|(_, bytes)| EditImage {
                             bytes: bytes.clone(),
                             rect: im.rect,
+                            opacity: im.opacity,
                         })
                 })
                 .collect(),
@@ -173,6 +178,7 @@ async fn pending_edits(attachments: &[(String, Vec<u8>)]) -> Result<Vec<PageEdit
                     size: t.size,
                     color: hex_color(&t.color),
                     pos: (t.x, t.y),
+                    bold: t.bold,
                 })
                 .collect(),
             rects: p
@@ -598,7 +604,7 @@ pub fn EditorPage() -> Element {
                             onclick: move |_| set_tool("text"),
                             "🅰"
                         }
-                        label { class: "ed-mode", r#for: "img-in", title: "Image — drag a rectangle to stamp", "🖼" }
+                        label { class: "ed-mode", r#for: "img-in", title: "Image — inserts at source size; drag, resize, set opacity", "🖼" }
                     }
                     div { class: "ed-group",
                         button {
@@ -942,9 +948,12 @@ pub fn EditorPage() -> Element {
                             let js = format!("return (async () => {{ return {stage_call}; }})();");
                             match eval(&js).await {
                                 Ok(_) => {
-                                    tool.set("image");
+                                    tool.set("cursor");
                                     attachments.write().push((id, bytes.to_vec()));
-                                    notice.set("Drag a rectangle on a page to place the image.".into());
+                                    notice.set(
+                                        "Image placed — drag to move, corner to resize, ✕ or Delete to remove."
+                                            .into(),
+                                    );
                                 }
                                 Err(e) => error.set(format!("could not load image: {e:?}")),
                             }
