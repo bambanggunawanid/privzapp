@@ -794,7 +794,7 @@ function pzMakeImage(n, id, url, x, y, w, h) {
   del.title = "Delete image";
   const rs = document.createElement("div");
   rs.className = "pz-obj-resize";
-  rs.title = "Resize";
+  rs.title = "Resize (hold Shift for proportional)";
   const op = document.createElement("input");
   op.type = "range";
   op.min = "10";
@@ -864,8 +864,16 @@ function pzImageResize(ev, n, rec) {
   const origW = rec.w;
   const origH = rec.h;
   const onMove = (mv) => {
-    rec.w = Math.max(16, origW + (mv.clientX - startX));
-    rec.h = Math.max(16, origH + (mv.clientY - startY));
+    let w = Math.max(16, origW + (mv.clientX - startX));
+    let h = Math.max(16, origH + (mv.clientY - startY));
+    if (mv.shiftKey) {
+      // Proportional: scale both axes by the dominant drag direction.
+      const s = Math.max(w / origW, h / origH);
+      w = Math.max(16, origW * s);
+      h = Math.max(16, origH * s);
+    }
+    rec.w = w;
+    rec.h = h;
     rec.el.style.width = rec.w + "px";
     rec.el.style.height = rec.h + "px";
   };

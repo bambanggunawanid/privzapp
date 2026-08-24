@@ -157,6 +157,49 @@ test.describe("editor workspace", () => {
     await expect(page.locator(".pz-img")).toHaveCount(1);
   });
 
+  test("image resize is free by default, proportional with Shift", async ({ page }) => {
+    await openPdf(page);
+    await page.setInputFiles("#img-in", {
+      name: "stamp.png",
+      mimeType: "image/png",
+      buffer: samplePng(),
+    });
+    const img = page.locator(".pz-img").first();
+    await expect(img).toBeVisible({ timeout: 15_000 });
+    const orig = await page.evaluate(() => {
+      const r = window.pzEd.images[1][0];
+      return { w: r.w, h: r.h };
+    });
+
+    const dragHandle = async (dx, dy) => {
+      await img.hover();
+      const hb = await page.locator(".pz-obj-resize").boundingBox();
+      await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(hb.x + dx, hb.y + dy, { steps: 4 });
+      await page.mouse.up();
+    };
+
+    // Free resize: stretch mostly horizontally → ratio changes.
+    await dragHandle(80, 8);
+    const free = await page.evaluate(() => {
+      const r = window.pzEd.images[1][0];
+      return { w: r.w, h: r.h };
+    });
+    expect(free.w / free.h).toBeGreaterThan((orig.w / orig.h) * 1.2);
+
+    // Shift resize: same drag keeps the aspect ratio.
+    await page.keyboard.down("Shift");
+    await dragHandle(60, 5);
+    await page.keyboard.up("Shift");
+    const prop = await page.evaluate(() => {
+      const r = window.pzEd.images[1][0];
+      return { w: r.w, h: r.h };
+    });
+    expect(prop.w / prop.h).toBeCloseTo(free.w / free.h, 1);
+    expect(prop.w).toBeGreaterThan(free.w);
+  });
+
   test("highlighter draws translucent yellow strokes", async ({ page }) => {
     await openPdf(page);
     await page.locator('button[title^="Highlighter"]').click();

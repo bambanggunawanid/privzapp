@@ -100,7 +100,8 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
   so quality can never make a file bigger.
 - Editor images are live objects: inserting places the image at its
   natural size on the current page — drag to move, corner handle to
-  resize, per-image opacity slider (baked with real PDF transparency),
+  resize (hold Shift for proportional), per-image opacity slider
+  (baked with real PDF transparency),
   ✕/Delete to remove, all undoable.
 
 ### Fixed
