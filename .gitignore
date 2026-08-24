@@ -7,3 +7,8 @@
 .env
 .env.*
 !.env.example
+
+# UI tests
+tests/ui/node_modules/
+tests/ui/test-results/
+tests/ui/playwright-report/

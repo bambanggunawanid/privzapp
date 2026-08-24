@@ -1,0 +1,11 @@
+{
+  "name": "privzapp-ui-tests",
+  "private": true,
+  "description": "Playwright UI tests for the PrivZapp web bundle (run via scripts/ui-test.sh)",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}

@@ -74,7 +74,27 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
   editor's PDF.js module import entirely.
 - Prerendered SEO content stayed visible above the app after load.
 
+### Added
+- Playwright UI test suite (`scripts/ui-test.sh`, `tests/ui/`): drives
+  the real wasm bundle in headless Chromium and pins every editor
+  behavior that has ever regressed (tool switching, text editability,
+  undo shortcuts, zoom, drag-reorder, export). Runs as its own CI job.
+- Editor text editing, reworked: the text tool places an editable box
+  wherever you click; boxes stay selectable, movable (drag with the
+  cursor tool) and re-editable until export. Clicking text that's
+  already in the PDF converts it to an editable box (white-out +
+  retype — best on white backgrounds).
+- Editor highlighter ("stabilo"): translucent yellow by default,
+  baked into the PDF with a real Multiply blend so text stays readable.
+- Editor undo/redo: Ctrl+Z / Ctrl+Shift+Z plus top-bar buttons —
+  canvas edits first, then document operations.
+- Editor views: ruler (PDF points) and grid toggles.
+- Reorder pages by dragging thumbnails in the left rail (the old
+  "3,1,2" text input is gone).
+
 ### Changed
+- Editor defaults: the cursor (select/move/edit) tool is active on
+  open — drawing is now an explicit choice.
 - The PDF editor is now a Figma-style workspace: full-viewport dark
   shell with page thumbnails on the left (click to jump), a dot-grid
   canvas with zoom (buttons or Ctrl+scroll, drawings rescale losslessly),

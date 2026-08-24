@@ -1,19 +1,20 @@
 //! The PDF editor workspace: a working document that tools operate on,
 //! design-tool style — a Figma-like shell with page thumbnails on the
-//! left, a zoomable canvas in the middle and a properties inspector on
-//! the right. Draw or sign, stamp images, place text, then rotate,
-//! number, watermark, crop, reorder or append; every operation applies
-//! to the working copy and returns to the editor. Export bakes
-//! everything and downloads (optionally compressed or password-protected).
+//! left (drag to reorder pages), a zoomable canvas in the middle and a
+//! properties inspector on the right. Cursor tool selects/moves/edits
+//! live text boxes (and converts detected PDF text to editable via
+//! white-out + retype); pen and highlighter draw; text places editable
+//! boxes anywhere; document operations return to the editor. Export
+//! bakes everything and downloads.
 //!
 //! Rendering is PDF.js (bundled locally, ADR-0007); all mutation is the
-//! Rust engine. Pending ink/stamps are auto-baked before any document
-//! operation so drawings survive structural changes.
+//! Rust engine. Pending ink/stamps/texts are auto-baked before any
+//! document operation so edits survive structural changes.
 
 use dioxus::document::eval;
 use dioxus::prelude::*;
 use pz_core::{stem, InputFile, OutputFile, ToolOptions};
-use pz_engine::{EditImage, PageEdit, PlacedText, Stroke};
+use pz_engine::{EditImage, PageEdit, PlacedRect, PlacedText, Stroke};
 use serde::Deserialize;
 
 use crate::save::{object_url, save_file};
@@ -25,8 +26,33 @@ const PDFJS_WORKER: Asset = asset!("/assets/pdfjs/pdf.worker.min.mjs");
 /// Waits for editor.js (loaded via a <script> tag) before touching its API.
 const WAIT_FOR_SCRIPT: &str = "for (let i = 0; i < 100 && typeof pzInit === 'undefined'; i++) { await new Promise(r => setTimeout(r, 50)); } if (typeof pzInit === 'undefined') { throw new Error('editor script did not load'); }";
 
-/// How many document states the operation-level Undo keeps.
+/// How many document states the operation-level undo/redo keeps.
 const MAX_HISTORY: usize = 8;
+
+/// The stabilo: translucent multiply-blended ink.
+const HIGHLIGHT_OPACITY: f32 = 0.4;
+
+/// Persistent JS→Rust channel: keyboard shortcuts (Ctrl+Z / Ctrl+Shift+Z
+/// fall through to document-level undo/redo when the canvas has nothing
+/// to undo) and thumbnail drag-reorder notifications.
+const CHANNEL_JS: &str = r#"
+window.pzNotify = (m) => { try { dioxus.send(m); } catch (e) {} };
+if (!window.pzKeysBound) {
+  window.pzKeysBound = true;
+  document.addEventListener('keydown', (e) => {
+    const el = document.activeElement;
+    if (el && (el.isContentEditable || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      const redo = e.shiftKey;
+      const did = redo ? (typeof pzRedo === 'function' && pzRedo())
+                       : (typeof pzUndo === 'function' && pzUndo());
+      if (!did && window.pzNotify) window.pzNotify(redo ? 'op-redo' : 'op-undo');
+    }
+  });
+}
+await new Promise(() => {});
+"#;
 
 /// Feed bytes to a JS function: a blob URL on the web (cheap at any size),
 /// inline base64 on native webviews where `blob:` URLs can't be minted
@@ -62,6 +88,8 @@ struct ExportPage {
     images: Vec<ExportImage>,
     #[serde(default)]
     texts: Vec<ExportText>,
+    #[serde(default)]
+    rects: Vec<ExportRect>,
 }
 
 #[derive(Deserialize)]
@@ -73,10 +101,16 @@ struct ExportText {
     y: f32,
 }
 
+fn default_opacity() -> f32 {
+    1.0
+}
+
 #[derive(Deserialize)]
 struct ExportStroke {
     color: String,
     width: f32,
+    #[serde(default = "default_opacity")]
+    opacity: f32,
     points: Vec<(f32, f32)>,
 }
 
@@ -86,13 +120,19 @@ struct ExportImage {
     rect: (f32, f32, f32, f32),
 }
 
+#[derive(Deserialize)]
+struct ExportRect {
+    rect: (f32, f32, f32, f32),
+    color: (u8, u8, u8),
+}
+
 fn hex_color(s: &str) -> (u8, u8, u8) {
     let h = s.trim_start_matches('#');
     let p = |i| u8::from_str_radix(h.get(i..i + 2).unwrap_or("00"), 16).unwrap_or(0);
     (p(0), p(2), p(4))
 }
 
-/// Pull pending drawings/stamps out of the JS overlays as typed edits.
+/// Pull pending drawings/stamps/texts out of the JS layer as typed edits.
 async fn pending_edits(attachments: &[(String, Vec<u8>)]) -> Result<Vec<PageEdit>, String> {
     let v = eval("return pzExport();")
         .await
@@ -109,6 +149,7 @@ async fn pending_edits(attachments: &[(String, Vec<u8>)]) -> Result<Vec<PageEdit
                     color: hex_color(&s.color),
                     width: s.width,
                     points: s.points,
+                    opacity: s.opacity,
                 })
                 .collect(),
             images: p
@@ -134,8 +175,21 @@ async fn pending_edits(attachments: &[(String, Vec<u8>)]) -> Result<Vec<PageEdit
                     pos: (t.x, t.y),
                 })
                 .collect(),
+            rects: p
+                .rects
+                .into_iter()
+                .map(|r| PlacedRect {
+                    rect: r.rect,
+                    color: r.color,
+                })
+                .collect(),
         })
-        .filter(|p| !p.strokes.is_empty() || !p.images.is_empty() || !p.texts.is_empty())
+        .filter(|p| {
+            !p.strokes.is_empty()
+                || !p.images.is_empty()
+                || !p.texts.is_empty()
+                || !p.rects.is_empty()
+        })
         .collect())
 }
 
@@ -163,24 +217,28 @@ enum ExportKind {
 pub fn EditorPage() -> Element {
     let mut pdf = use_signal(|| Option::<(String, Vec<u8>)>::None);
     let mut history = use_signal(Vec::<Vec<u8>>::new);
+    let mut redo_stack = use_signal(Vec::<Vec<u8>>::new);
     let mut num_pages = use_signal(|| 0usize);
     let mut attachments = use_signal(Vec::<(String, Vec<u8>)>::new);
     let mut color = use_signal(|| "#1130cc".to_string());
     let mut size = use_signal(|| 3u8);
+    let mut hl_color = use_signal(|| "#ffe600".to_string());
+    let mut hl_size = use_signal(|| 14u8);
+    let mut text_size = use_signal(|| 18u8);
     let mut busy = use_signal(|| false);
     let mut error = use_signal(String::new);
     let mut notice = use_signal(String::new);
-    // Active canvas tool, mirrored to JS ("pen" | "pan").
-    let mut tool = use_signal(|| "pen");
+    // Active canvas tool, mirrored to JS.
+    let mut tool = use_signal(|| "cursor");
     // Which inspector section is expanded ("" = none).
     let mut panel = use_signal(|| "");
     // Inspector on small screens (CSS shows it statically on wide ones).
     let mut inspector_open = use_signal(|| false);
+    // View toggles.
+    let mut ruler = use_signal(|| false);
+    let mut grid = use_signal(|| false);
     // Section inputs.
-    let mut add_text = use_signal(String::new);
-    let mut text_size = use_signal(|| 18u8);
     let mut wm_text = use_signal(String::new);
-    let mut order_spec = use_signal(String::new);
     let mut margin = use_signal(|| {
         [
             "".to_string(),
@@ -193,7 +251,12 @@ pub fn EditorPage() -> Element {
 
     let mut set_tool = move |mode: &'static str| {
         tool.set(mode);
-        let js = format!("pzSetTool('{mode}', '{}', {});", color(), size());
+        let (c, s, o) = match mode {
+            "highlight" => (hl_color(), u32::from(hl_size()), HIGHLIGHT_OPACITY),
+            "text" => (color(), u32::from(text_size()), 1.0),
+            _ => (color(), u32::from(size()), 1.0),
+        };
+        let js = format!("pzSetTool('{mode}', '{c}', {s}, {o});");
         spawn(async move {
             let _ = eval(&js).await;
         });
@@ -205,7 +268,7 @@ pub fn EditorPage() -> Element {
         });
     };
 
-    // Run a document operation: bake pending ink, apply, re-render, stay
+    // Run a document operation: bake pending edits, apply, re-render, stay
     // in the editor. Export ops download instead of replacing the doc.
     let mut apply_op = move |op: Op| {
         busy.set(true);
@@ -217,7 +280,7 @@ pub fn EditorPage() -> Element {
                     return Err("no document loaded".to_string());
                 };
 
-                // 1. Bake pending drawings so they survive the operation.
+                // 1. Bake pending edits so they survive the operation.
                 let edits = pending_edits(&attachments.read()).await?;
                 let mut work = bytes.clone();
                 if !edits.is_empty() {
@@ -345,6 +408,7 @@ pub fn EditorPage() -> Element {
                         if h.len() > MAX_HISTORY {
                             h.remove(0);
                         }
+                        redo_stack.write().clear();
                     }
                     let pages = open_in_js(&nb).await?;
                     num_pages.set(pages);
@@ -365,7 +429,7 @@ pub fn EditorPage() -> Element {
         });
     };
 
-    let undo_op = move |_: Event<MouseData>| {
+    let mut op_undo = move || {
         let Some(prev) = history.write().pop() else {
             notice.set("Nothing to undo".into());
             return;
@@ -374,13 +438,91 @@ pub fn EditorPage() -> Element {
             match open_in_js(&prev).await {
                 Ok(pages) => {
                     num_pages.set(pages);
-                    if let Some((name, _)) = pdf() {
+                    if let Some((name, cur)) = pdf() {
+                        redo_stack.write().push(cur);
                         pdf.set(Some((name, prev)));
                     }
                     notice.set("Undid last operation".into());
                 }
                 Err(e) => error.set(e),
             }
+        });
+    };
+
+    let mut op_redo = move || {
+        let Some(next) = redo_stack.write().pop() else {
+            notice.set("Nothing to redo".into());
+            return;
+        };
+        spawn(async move {
+            match open_in_js(&next).await {
+                Ok(pages) => {
+                    num_pages.set(pages);
+                    if let Some((name, cur)) = pdf() {
+                        history.write().push(cur);
+                        pdf.set(Some((name, next)));
+                    }
+                    notice.set("Redid operation".into());
+                }
+                Err(e) => error.set(e),
+            }
+        });
+    };
+
+    // Canvas-level undo/redo first; document-level as the fallback.
+    let unified = move |redo: bool| {
+        spawn(async move {
+            let call = if redo {
+                "return pzRedo();"
+            } else {
+                "return pzUndo();"
+            };
+            let did = eval(call)
+                .await
+                .ok()
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !did {
+                if redo {
+                    op_redo();
+                } else {
+                    op_undo();
+                }
+            }
+        });
+    };
+
+    // Keyboard shortcuts + thumbnail-reorder notifications from JS.
+    use_effect(move || {
+        spawn(async move {
+            let mut ev = eval(CHANNEL_JS);
+            while let Ok(msg) = ev.recv::<String>().await {
+                if let Some(spec) = msg.strip_prefix("reorder:") {
+                    apply_op(Op::Organize(spec.to_string()));
+                } else if msg == "op-undo" {
+                    op_undo();
+                } else if msg == "op-redo" {
+                    op_redo();
+                }
+            }
+        });
+    });
+
+    let mut toggle_view = move |kind: &'static str| {
+        let on = if kind == "ruler" {
+            let v = !ruler();
+            ruler.set(v);
+            v
+        } else {
+            let v = !grid();
+            grid.set(v);
+            v
+        };
+        spawn(async move {
+            let _ = eval(&format!(
+                "setTimeout(() => {{ if (typeof pzView === 'function') pzView('{kind}', {on}); if (typeof pzDrawRulers === 'function') pzDrawRulers(); }}, 60);"
+            ))
+            .await;
         });
     };
 
@@ -403,6 +545,11 @@ pub fn EditorPage() -> Element {
         .unwrap_or_else(|| "Edit PDF".to_string());
     let loaded = pdf.read().is_some();
 
+    let wrap_class = match (loaded, ruler()) {
+        (true, true) => "ed-canvas-wrap ed-rulers",
+        _ => "ed-canvas-wrap",
+    };
+
     rsx! {
         document::Script { src: EDITOR_JS }
         if let Some(seo) = pz_core::seo::seo_for("edit-pdf") {
@@ -419,47 +566,76 @@ pub fn EditorPage() -> Element {
                         span { class: "muted small", "{num_pages} page(s)" }
                     }
                 }
-                div { class: "ed-modes",
-                    button {
-                        class: if tool() == "pan" { "ed-mode active" } else { "ed-mode" },
-                        title: "Hand — drag to pan (or hold Ctrl + scroll to zoom)",
-                        onclick: move |_| set_tool("pan"),
-                        "✋"
+                div { class: "ed-center",
+                    div { class: "ed-modes",
+                        button {
+                            class: if tool() == "cursor" { "ed-mode active" } else { "ed-mode" },
+                            title: "Cursor — select, move and edit text (click page text to edit it)",
+                            onclick: move |_| set_tool("cursor"),
+                            "✥"
+                        }
+                        button {
+                            class: if tool() == "pan" { "ed-mode active" } else { "ed-mode" },
+                            title: "Hand — drag to pan (Ctrl + scroll zooms)",
+                            onclick: move |_| set_tool("pan"),
+                            "✋"
+                        }
+                        button {
+                            class: if tool() == "pen" { "ed-mode active" } else { "ed-mode" },
+                            title: "Pen — draw or sign by hand",
+                            onclick: move |_| set_tool("pen"),
+                            "✒"
+                        }
+                        button {
+                            class: if tool() == "highlight" { "ed-mode active" } else { "ed-mode" },
+                            title: "Highlighter — translucent stabilo",
+                            onclick: move |_| set_tool("highlight"),
+                            "🖍"
+                        }
+                        button {
+                            class: if tool() == "text" { "ed-mode active" } else { "ed-mode" },
+                            title: "Text — click anywhere on a page to type",
+                            onclick: move |_| set_tool("text"),
+                            "🅰"
+                        }
+                        label { class: "ed-mode", r#for: "img-in", title: "Image — drag a rectangle to stamp", "🖼" }
                     }
-                    button {
-                        class: if tool() == "pen" { "ed-mode active" } else { "ed-mode" },
-                        title: "Pen — draw or sign by hand",
-                        onclick: move |_| set_tool("pen"),
-                        "✒"
+                    div { class: "ed-group",
+                        button {
+                            class: "ed-icon",
+                            title: "Undo (Ctrl+Z)",
+                            onclick: move |_| unified(false),
+                            "↶"
+                        }
+                        button {
+                            class: "ed-icon",
+                            title: "Redo (Ctrl+Shift+Z)",
+                            onclick: move |_| unified(true),
+                            "↷"
+                        }
                     }
-                    button {
-                        class: if panel() == "text" { "ed-mode active" } else { "ed-mode" },
-                        title: "Text — type, then tap the page to place",
-                        onclick: move |_| {
-                            panel.set(if panel() == "text" { "" } else { "text" });
-                            inspector_open.set(true);
-                        },
-                        "🅰"
+                    div { class: "ed-group",
+                        button { class: "ed-icon", title: "Zoom out", onclick: move |_| zoom("out"), "−" }
+                        span { id: "pz-zoomlvl", class: "ed-zoomlvl", "100%" }
+                        button { class: "ed-icon", title: "Zoom in", onclick: move |_| zoom("in"), "+" }
+                        button { class: "ed-icon", title: "Fit width", onclick: move |_| zoom("fit"), "⤢" }
                     }
-                    label { class: "ed-mode", r#for: "img-in", title: "Image — drag a rectangle to stamp", "🖼" }
+                    div { class: "ed-group",
+                        button {
+                            class: if ruler() { "ed-icon active" } else { "ed-icon" },
+                            title: "Toggle rulers (PDF points)",
+                            onclick: move |_| toggle_view("ruler"),
+                            "📏"
+                        }
+                        button {
+                            class: if grid() { "ed-icon active" } else { "ed-icon" },
+                            title: "Toggle grid",
+                            onclick: move |_| toggle_view("grid"),
+                            "⊞"
+                        }
+                    }
                 }
                 div { class: "ed-actions",
-                    button {
-                        class: "ed-icon",
-                        title: "Undo last stroke, text or stamp",
-                        onclick: move |_| {
-                            spawn(async move {
-                                let _ = eval("pzUndo();").await;
-                            });
-                        },
-                        "↶"
-                    }
-                    button {
-                        class: "ed-icon",
-                        title: "Undo last document operation",
-                        onclick: undo_op,
-                        "⎌"
-                    }
                     button {
                         class: "ed-icon ed-insp-toggle",
                         title: "Toggle inspector",
@@ -482,15 +658,21 @@ pub fn EditorPage() -> Element {
             }
 
             div { class: "ed-main",
-                // ---- page thumbnails ----
+                // ---- page thumbnails (drag to reorder) ----
                 aside { class: "ed-left",
                     div { id: "pz-thumbs" }
+                    if loaded {
+                        p { class: "ed-thumbhint", "Drag pages to reorder" }
+                    }
                 }
 
                 // ---- canvas ----
-                div { class: "ed-canvas-wrap",
+                div { class: wrap_class,
+                    div { class: "ed-ruler ed-ruler-corner" }
+                    canvas { id: "pz-ruler-h", class: "ed-ruler ed-ruler-h" }
+                    canvas { id: "pz-ruler-v", class: "ed-ruler ed-ruler-v" }
                     div { class: "ed-canvas",
-                        div { id: "pz-pages" }
+                        div { id: "pz-pages", class: if grid() { "pz-grid-on" } else { "" } }
                         if !loaded {
                             div { class: "ed-drop",
                                 div { class: "panel ed-drop-card",
@@ -509,23 +691,17 @@ pub fn EditorPage() -> Element {
                             }
                         }
                     }
-                    if loaded {
-                        div { class: "ed-float ed-pageind",
-                            span { id: "pz-pageno", "–" }
-                        }
-                        div { class: "ed-float ed-zoom",
-                            button { class: "ed-icon", title: "Zoom out", onclick: move |_| zoom("out"), "−" }
-                            span { id: "pz-zoomlvl", class: "ed-zoomlvl", "100%" }
-                            button { class: "ed-icon", title: "Zoom in", onclick: move |_| zoom("in"), "+" }
-                            button { class: "ed-icon", title: "Fit width", onclick: move |_| zoom("fit"), "⤢" }
-                        }
+                    // Always mounted: editor.js writes into it right after
+                    // rendering, which can happen before `loaded` flips.
+                    div { class: "ed-float ed-pageind",
+                        span { id: "pz-pageno", "–" }
                     }
                 }
 
                 // ---- inspector ----
                 aside { class: if inspector_open() { "ed-right open" } else { "ed-right" },
                     div { class: "ed-sec",
-                        span { class: "ed-sec-title", "Pen" }
+                        span { class: "ed-sec-title", "✒ Pen" }
                         div { class: "ed-row",
                             input {
                                 r#type: "color",
@@ -550,45 +726,51 @@ pub fn EditorPage() -> Element {
                     }
 
                     div { class: "ed-sec",
-                        {sec("text", "🅰 Add text")}
-                        if panel() == "text" {
-                            div { class: "ed-sec-body",
-                                textarea {
-                                    rows: "3",
-                                    placeholder: "Type your text — Enter for a new line",
-                                    value: "{add_text}",
-                                    oninput: move |evt| add_text.set(evt.value()),
-                                }
-                                div { class: "ed-row",
-                                    input {
-                                        r#type: "range",
-                                        min: "8",
-                                        max: "72",
-                                        value: "{text_size}",
-                                        oninput: move |evt| text_size.set(evt.value().parse().unwrap_or(18)),
-                                    }
-                                    span { class: "muted small", "{text_size}pt" }
-                                }
-                                button {
-                                    class: "primary small-btn",
-                                    disabled: busy() || add_text.read().trim().is_empty(),
-                                    onclick: move |_| {
-                                        // serde_json produces a safely-escaped JS string literal.
-                                        let text_js = serde_json::to_string(&add_text()).unwrap_or_default();
-                                        let js = format!(
-                                            "pzStageText({text_js}, '{}', {});",
-                                            color(),
-                                            text_size()
-                                        );
-                                        spawn(async move {
-                                            let _ = eval(&js).await;
-                                            notice.set("Tap on a page where the text should go.".into());
-                                        });
-                                    },
-                                    "Place text"
-                                }
-                                span { class: "muted small", "Uses the pen color. Latin characters only." }
+                        span { class: "ed-sec-title", "🖍 Highlighter" }
+                        div { class: "ed-row",
+                            input {
+                                r#type: "color",
+                                value: "{hl_color}",
+                                oninput: move |evt| {
+                                    hl_color.set(evt.value());
+                                    set_tool("highlight");
+                                },
                             }
+                            input {
+                                r#type: "range",
+                                min: "6",
+                                max: "32",
+                                value: "{hl_size}",
+                                oninput: move |evt| {
+                                    hl_size.set(evt.value().parse().unwrap_or(14));
+                                    set_tool("highlight");
+                                },
+                            }
+                            span { class: "muted small", "{hl_size}px" }
+                        }
+                    }
+
+                    div { class: "ed-sec",
+                        span { class: "ed-sec-title", "🅰 Text" }
+                        div { class: "ed-row",
+                            input {
+                                r#type: "range",
+                                min: "8",
+                                max: "72",
+                                value: "{text_size}",
+                                oninput: move |evt| {
+                                    text_size.set(evt.value().parse().unwrap_or(18));
+                                    if tool() == "text" {
+                                        set_tool("text");
+                                    }
+                                },
+                            }
+                            span { class: "muted small", "{text_size}px" }
+                        }
+                        p { class: "muted small",
+                            "Pick the text tool, click a page to type. Click existing "
+                            "text to edit it (best on white backgrounds). Boxes stay "
+                            "movable and editable until export."
                         }
                     }
 
@@ -662,29 +844,6 @@ pub fn EditorPage() -> Element {
                     }
 
                     div { class: "ed-sec",
-                        {sec("organize", "🔀 Organize pages")}
-                        if panel() == "organize" {
-                            div { class: "ed-sec-body",
-                                span { class: "muted small",
-                                    "New order — repeat to duplicate, omit to delete:"
-                                }
-                                input {
-                                    r#type: "text",
-                                    placeholder: "3,1,2",
-                                    value: "{order_spec}",
-                                    oninput: move |evt| order_spec.set(evt.value()),
-                                }
-                                button {
-                                    class: "primary small-btn",
-                                    disabled: busy(),
-                                    onclick: move |_| apply_op(Op::Organize(order_spec())),
-                                    "Apply order"
-                                }
-                            }
-                        }
-                    }
-
-                    div { class: "ed-sec",
                         label { class: "ed-sec-h", r#for: "append-in",
                             span { "➕ Append another PDF" }
                         }
@@ -730,7 +889,7 @@ pub fn EditorPage() -> Element {
                     }
                     p { class: "muted small ed-privacy",
                         "Rendered and edited entirely on this device — the file, your "
-                        "signature and everything you draw never leave it."
+                        "signature and everything you type or draw never leave it."
                     }
                 }
             }
@@ -752,6 +911,7 @@ pub fn EditorPage() -> Element {
                                 Ok(pages) => {
                                     num_pages.set(pages);
                                     history.set(Vec::new());
+                                    redo_stack.set(Vec::new());
                                     pdf.set(Some((f.name(), bytes.to_vec())));
                                 }
                                 Err(e) => error.set(e),
@@ -782,6 +942,7 @@ pub fn EditorPage() -> Element {
                             let js = format!("return (async () => {{ return {stage_call}; }})();");
                             match eval(&js).await {
                                 Ok(_) => {
+                                    tool.set("image");
                                     attachments.write().push((id, bytes.to_vec()));
                                     notice.set("Drag a rectangle on a page to place the image.".into());
                                 }

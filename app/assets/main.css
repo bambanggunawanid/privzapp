@@ -361,6 +361,18 @@ a:hover { text-decoration: underline; }
   text-overflow: ellipsis;
   max-width: 28vw;
 }
+.ed-center { display: flex; align-items: center; gap: 10px; flex: none; }
+.ed-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 3px;
+}
+.ed-group .ed-icon { border: none; width: 28px; height: 26px; }
+.ed-icon.active { background: rgba(108, 140, 255, 0.2); color: var(--text); }
 .ed-modes {
   display: flex;
   gap: 2px;
@@ -483,12 +495,37 @@ a:hover { text-decoration: underline; }
   font-size: 0.85rem;
   color: var(--muted);
 }
-.ed-zoom { right: 14px; bottom: 14px; }
 .ed-zoomlvl {
   min-width: 44px;
   text-align: center;
   font-size: 0.82rem;
   color: var(--muted);
+}
+
+/* Rulers (PDF points, anchored to page 1's corner) + grid view. */
+.ed-ruler { display: none; position: absolute; background: var(--bg-raise); z-index: 4; }
+.ed-canvas-wrap.ed-rulers .ed-ruler { display: block; }
+.ed-ruler-h { top: 0; left: 22px; right: 0; height: 22px; border-bottom: 1px solid var(--line); }
+.ed-ruler-v { top: 22px; left: 0; bottom: 0; width: 22px; border-right: 1px solid var(--line); }
+.ed-ruler-corner {
+  top: 0;
+  left: 0;
+  width: 22px;
+  height: 22px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.ed-canvas-wrap.ed-rulers .ed-canvas { top: 22px; left: 22px; }
+#pz-pages.pz-grid-on .pz-page::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  background-image:
+    linear-gradient(rgba(80, 120, 255, 0.16) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(80, 120, 255, 0.16) 1px, transparent 1px);
+  background-size: var(--pz-grid, 24px) var(--pz-grid, 24px);
 }
 
 .ed-right {
@@ -553,8 +590,11 @@ a:hover { text-decoration: underline; }
    is loaded. */
 .ed-shell.empty .ed-left,
 .ed-shell.empty .ed-right { opacity: 0.45; pointer-events: none; }
+.ed-shell.empty .ed-pageind { display: none; }
 
-/* Pages + overlays (created by editor.js). */
+/* Pages + layers (created by editor.js). Bottom→top: PDF render,
+   text layer, under-canvas (white-outs + image previews), live text
+   boxes, ink overlay. */
 .pz-page {
   position: relative;
   margin: 0 auto 20px;
@@ -564,11 +604,64 @@ a:hover { text-decoration: underline; }
   background: #fff;
 }
 .pz-page canvas { display: block; }
+.pz-textlayer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  line-height: 1;
+  transform-origin: 0 0;
+  z-index: 1;
+}
+.pz-textlayer span {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0 0;
+}
+.pz-under {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+.pz-text {
+  position: absolute;
+  z-index: 3;
+  min-width: 8px;
+  min-height: 0.9em;
+  line-height: 1.25;
+  font-family: Helvetica, Arial, sans-serif;
+  outline: 1.5px dashed transparent;
+  outline-offset: 2px;
+  white-space: pre-wrap;
+  cursor: move;
+}
+.pz-text:hover { outline-color: rgba(108, 140, 255, 0.7); }
+.pz-text:focus {
+  outline: 1.5px solid #6c8cff;
+  cursor: text;
+  background: rgba(108, 140, 255, 0.05);
+}
 .pz-overlay {
   position: absolute;
   inset: 0;
+  z-index: 4;
   touch-action: none;
   cursor: crosshair;
+}
+/* Text boxes only react to the cursor/text tools. */
+.ed-canvas[data-pz-mode="pen"] .pz-text,
+.ed-canvas[data-pz-mode="highlight"] .pz-text,
+.ed-canvas[data-pz-mode="image"] .pz-text,
+.ed-canvas[data-pz-mode="pan"] .pz-text { pointer-events: none; }
+.ed-canvas[data-pz-mode="pan"] .pz-textlayer span { cursor: grab; }
+.pz-thumb.dragging { opacity: 0.4; }
+.ed-thumbhint {
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-align: center;
+  margin: 4px 0 0;
 }
 
 @media (max-width: 900px) {

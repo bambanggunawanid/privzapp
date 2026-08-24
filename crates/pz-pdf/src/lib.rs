@@ -764,12 +764,22 @@ pub fn protect(
 }
 
 /// A freehand ink stroke (signature / handwriting) in PDF coordinates
-/// (points, origin bottom-left).
+/// (points, origin bottom-left). `opacity` below 1.0 renders with a
+/// Multiply blend (highlighter: text stays readable underneath).
 #[derive(Debug, Clone)]
 pub struct Stroke {
     pub color: (u8, u8, u8),
     pub width: f32,
     pub points: Vec<(f32, f32)>,
+    pub opacity: f32,
+}
+
+/// A filled rectangle in PDF points, y = bottom edge — the editor's
+/// white-out under retyped text.
+#[derive(Debug, Clone)]
+pub struct PlacedRect {
+    pub rect: (f32, f32, f32, f32),
+    pub color: (u8, u8, u8),
 }
 
 /// A JPEG placed on a page. `rect` is (x, y, width, height) in PDF points,
@@ -793,7 +803,8 @@ pub struct PlacedText {
     pub pos: (f32, f32),
 }
 
-/// Everything the editor drew on one page.
+/// Everything the editor drew on one page. Paint order: rects (white-out,
+/// bottom), then images, texts, and ink strokes on top.
 #[derive(Debug, Clone, Default)]
 pub struct PageEdits {
     /// 1-based page number.
@@ -801,6 +812,7 @@ pub struct PageEdits {
     pub strokes: Vec<Stroke>,
     pub images: Vec<PlacedJpeg>,
     pub texts: Vec<PlacedText>,
+    pub rects: Vec<PlacedRect>,
 }
 
 /// Bake editor annotations (ink strokes and placed images) into the PDF.
@@ -819,7 +831,11 @@ pub fn annotate(name: &str, bytes: &[u8], edits: &[PageEdits]) -> Result<OutputF
     });
 
     for edit in edits {
-        if edit.strokes.is_empty() && edit.images.is_empty() && edit.texts.is_empty() {
+        if edit.strokes.is_empty()
+            && edit.images.is_empty()
+            && edit.texts.is_empty()
+            && edit.rects.is_empty()
+        {
             continue;
         }
         let Some(&page_id) = pages.get(&edit.page) else {
@@ -830,7 +846,44 @@ pub fn annotate(name: &str, bytes: &[u8], edits: &[PageEdits]) -> Result<OutputF
         };
         applied = true;
 
+        // One ExtGState per distinct sub-1 stroke opacity on this page
+        // (Multiply blend so highlighter ink keeps text readable).
+        let mut gstates: Vec<(u16, String)> = Vec::new();
+        for stroke in &edit.strokes {
+            let key = (stroke.opacity.clamp(0.0, 1.0) * 1000.0) as u16;
+            if key < 1000 && !gstates.iter().any(|(k, _)| *k == key) {
+                let res_name = format!("PZgs{key}");
+                let gs_id = doc.add_object(dictionary! {
+                    "Type" => "ExtGState",
+                    "CA" => f32::from(key) / 1000.0,
+                    "ca" => f32::from(key) / 1000.0,
+                    "BM" => "Multiply",
+                });
+                add_page_resource(&mut doc, page_id, "ExtGState", &res_name, gs_id)?;
+                gstates.push((key, res_name));
+            }
+        }
+
         let mut ops: Vec<Operation> = Vec::new();
+        for rect in &edit.rects {
+            let (r, g, b) = rect.color;
+            let (x, y, w, h) = rect.rect;
+            ops.push(Operation::new("q", vec![]));
+            ops.push(Operation::new(
+                "rg",
+                vec![
+                    (r as f32 / 255.0).into(),
+                    (g as f32 / 255.0).into(),
+                    (b as f32 / 255.0).into(),
+                ],
+            ));
+            ops.push(Operation::new(
+                "re",
+                vec![x.into(), y.into(), w.into(), h.into()],
+            ));
+            ops.push(Operation::new("f", vec![]));
+            ops.push(Operation::new("Q", vec![]));
+        }
         for img in &edit.images {
             img_counter += 1;
             let res_name = format!("PZim{img_counter}");
@@ -905,6 +958,13 @@ pub fn annotate(name: &str, bytes: &[u8], edits: &[PageEdits]) -> Result<OutputF
             }
             let (r, g, b) = stroke.color;
             ops.push(Operation::new("q", vec![]));
+            let key = (stroke.opacity.clamp(0.0, 1.0) * 1000.0) as u16;
+            if let Some((_, res_name)) = gstates.iter().find(|(k, _)| *k == key) {
+                ops.push(Operation::new(
+                    "gs",
+                    vec![Object::Name(res_name.clone().into_bytes())],
+                ));
+            }
             ops.push(Operation::new("J", vec![1.into()])); // round caps
             ops.push(Operation::new("j", vec![1.into()])); // round joins
             ops.push(Operation::new("w", vec![stroke.width.max(0.2).into()]));
@@ -1234,6 +1294,7 @@ mod tests {
                 color: (0, 0, 255),
                 width: 2.5,
                 points: vec![(100.0, 100.0), (150.0, 130.0), (200.0, 100.0)],
+                opacity: 1.0,
             }],
             images: vec![PlacedJpeg {
                 jpeg: sample_jpeg(20, 20),
@@ -1247,6 +1308,7 @@ mod tests {
                 color: (200, 30, 30),
                 pos: (72.0, 700.0),
             }],
+            rects: vec![],
         }];
         let out = annotate("doc.pdf", &sample_pdf(2), &edits).unwrap();
         assert_eq!(out.name, "doc-edited.pdf");
@@ -1270,11 +1332,52 @@ mod tests {
                 color: (0, 0, 0),
                 width: 4.0,
                 points: vec![(50.0, 50.0)],
+                opacity: 1.0,
             }],
             images: vec![],
             texts: vec![],
+            rects: vec![],
         }];
         assert!(annotate("doc.pdf", &sample_pdf(1), &edits).is_ok());
+    }
+
+    #[test]
+    fn annotate_highlight_and_whiteout() {
+        let edits = vec![PageEdits {
+            page: 1,
+            strokes: vec![Stroke {
+                color: (255, 230, 0),
+                width: 12.0,
+                points: vec![(80.0, 400.0), (300.0, 400.0)],
+                opacity: 0.4,
+            }],
+            images: vec![],
+            texts: vec![PlacedText {
+                text: "Corrected".into(),
+                size: 11.0,
+                color: (0, 0, 0),
+                pos: (80.0, 500.0),
+            }],
+            rects: vec![PlacedRect {
+                rect: (78.0, 496.0, 120.0, 16.0),
+                color: (255, 255, 255),
+            }],
+        }];
+        let out = annotate("doc.pdf", &sample_pdf(1), &edits).unwrap();
+        let doc = Document::load_mem(&out.bytes).unwrap();
+        let page = *doc.get_pages().values().next().unwrap();
+        let content = doc.get_page_content(page);
+        // Highlighter: ExtGState applied; white-out: filled rectangle.
+        assert!(content.windows(7).any(|w| w == b"PZgs400"));
+        assert!(content.windows(2).any(|w| w == b"re"));
+        assert!(content.windows(9).any(|w| w == b"Corrected"));
+        let gs = doc
+            .objects
+            .values()
+            .filter_map(|o| o.as_dict().ok())
+            .find(|d| d.get(b"Type").and_then(|t| t.as_name()).ok() == Some(b"ExtGState"))
+            .expect("ExtGState object registered");
+        assert_eq!(gs.get(b"BM").unwrap().as_name().unwrap(), b"Multiply");
     }
 
     #[test]
@@ -1285,9 +1388,11 @@ mod tests {
                 color: (0, 0, 0),
                 width: 1.0,
                 points: vec![(1.0, 1.0), (2.0, 2.0)],
+                opacity: 1.0,
             }],
             images: vec![],
             texts: vec![],
+            rects: vec![],
         }];
         assert!(annotate("doc.pdf", &sample_pdf(1), &edits).is_err());
         assert!(annotate("doc.pdf", &sample_pdf(1), &[]).is_err());

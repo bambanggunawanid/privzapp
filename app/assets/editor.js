@@ -1,29 +1,38 @@
 // PrivZapp PDF editor glue.
 //
 // Owns the PDF.js render (bundled locally — nothing is fetched from the
-// network) and the per-page drawing overlays. The Rust side calls the pz*
-// functions via dioxus eval and receives the final annotations from
-// pzExport() in PDF coordinates, ready for the engine to bake in.
+// network), the per-page drawing overlays and the live text objects. The
+// Rust side calls the pz* functions via dioxus eval and receives the final
+// annotations from pzExport() in PDF coordinates, ready for the engine to
+// bake in.
 //
-// Workspace extras (thumbnails, zoom, pan) live here too: they are pure
-// presentation. Zoom re-renders pages at the new scale and rescales the
-// stored overlay-pixel annotations by the same ratio, so pzExport()'s
-// scale-relative math never changes.
+// Layering inside each .pz-page wrap (bottom → top), mirroring the
+// engine's paint order (rects → images → texts → ink):
+//   1. base canvas    — the PDF.js render
+//   2. .pz-textlayer  — transparent selectable text (detection for retype)
+//   3. .pz-under      — white-out rects + staged image previews
+//   4. .pz-text divs  — live, editable text boxes (contenteditable)
+//   5. .pz-overlay    — ink strokes; the pointer target for drawing tools
+//
+// Tools: cursor (default; select/move/edit text, click detected text to
+// retype), pan, pen, highlight (translucent multiply), text, image.
 
 window.pzEd = {
   lib: null,
   doc: null,
-  pages: [], // 1-based: {wrap, canvas, overlay, ctx, scale, fitScale, pdfW, pdfH}
-  tool: { mode: "pen", color: "#1130cc", size: 3 },
-  strokes: {}, // page -> [{color,size,points:[[x,y],…]}] in overlay px
-  images: {}, // page -> [{id,x,y,w,h}] in overlay px
-  texts: {}, // page -> [{text,color,size,x,y}] in overlay px, y = 1st baseline
+  pages: [], // 1-based: {wrap, canvas, under, uctx, overlay, ctx, scale, fitScale, pdfW, pdfH}
+  tool: { mode: "cursor", color: "#1130cc", size: 3, opacity: 1 },
+  strokes: {}, // page -> [{color,size,opacity,points:[[x,y],…]}] overlay px
+  images: {}, // page -> [{id,x,y,w,h}] overlay px
+  texts: {}, // page -> [{el,x,y,size,color}] top-left overlay px
+  rects: {}, // page -> [{x,y,w,h,spanEl}] white-outs, overlay px
   bitmaps: {}, // image id -> ImageBitmap (preview only)
   staged: null, // image id waiting for placement
-  stagedText: null, // {text,color,size} waiting for a tap
-  history: [], // [{type:'stroke'|'image'|'text', page}]
+  history: [], // [{type:'stroke'|'image'|'text'|'retype', page, obj?}]
+  redo: [], // popped history entries with payloads
   zoom: 1, // 1 = fit-width; survives re-opens so operations keep your view
   zooming: false,
+  dragThumb: null,
 };
 
 async function pzInit(pdfjsUrl, workerUrl) {
@@ -59,10 +68,11 @@ async function pzOpenParams(params) {
   E.strokes = {};
   E.images = {};
   E.texts = {};
+  E.rects = {};
   E.bitmaps = {};
   E.history = [];
+  E.redo = [];
   E.staged = null;
-  E.stagedText = null;
   const container = document.getElementById("pz-pages");
   container.innerHTML = "";
   const thumbs = document.getElementById("pz-thumbs");
@@ -78,15 +88,23 @@ async function pzOpenParams(params) {
     wrap.className = "pz-page";
     wrap.style.width = vp.width + "px";
     wrap.style.height = vp.height + "px";
+    wrap.style.setProperty("--scale-factor", scale);
     const canvas = document.createElement("canvas");
     canvas.width = vp.width;
     canvas.height = vp.height;
+    const tl = document.createElement("div");
+    tl.className = "pz-textlayer textLayer";
+    const under = document.createElement("canvas");
+    under.width = vp.width;
+    under.height = vp.height;
+    under.className = "pz-under";
     const overlay = document.createElement("canvas");
     overlay.width = vp.width;
     overlay.height = vp.height;
     overlay.className = "pz-overlay";
-    if (E.tool.mode === "pan") overlay.style.pointerEvents = "none";
     wrap.appendChild(canvas);
+    wrap.appendChild(tl);
+    wrap.appendChild(under);
     wrap.appendChild(overlay);
     container.appendChild(wrap);
     await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp })
@@ -94,6 +112,8 @@ async function pzOpenParams(params) {
     E.pages[n] = {
       wrap,
       canvas,
+      under,
+      uctx: under.getContext("2d"),
       overlay,
       ctx: overlay.getContext("2d"),
       scale,
@@ -101,13 +121,31 @@ async function pzOpenParams(params) {
       pdfW: base.width,
       pdfH: base.height,
     };
+    // Selectable/detectable text under everything (retype source).
+    try {
+      const textLayer = new E.lib.TextLayer({
+        textContentSource: page.streamTextContent(),
+        container: tl,
+        viewport: vp,
+      });
+      await textLayer.render();
+    } catch (e) {
+      // No text layer (scanned page / older API) — retype simply unavailable.
+    }
     pzHook(overlay, n);
+    pzHookWrap(wrap, n);
     if (thumbs) await pzThumb(thumbs, page, base, n, wrap);
   }
   pzBindScroller(container);
+  pzApplyMode();
   pzIndicate(1, E.doc.numPages);
   const z = document.getElementById("pz-zoomlvl");
   if (z) z.textContent = Math.round(E.zoom * 100) + "%";
+  const grid = document.getElementById("pz-pages");
+  if (grid && E.pages[1]) {
+    grid.style.setProperty("--pz-grid", E.pages[1].scale * 24 + "px");
+  }
+  pzDrawRulers();
   return E.doc.numPages;
 }
 
@@ -120,18 +158,65 @@ async function pzThumb(thumbs, page, base, n, wrap) {
   const item = document.createElement("div");
   item.className = n === 1 ? "pz-thumb active" : "pz-thumb";
   item.dataset.page = n;
+  item.draggable = true;
   const num = document.createElement("span");
   num.textContent = n;
   item.appendChild(tc);
   item.appendChild(num);
-  item.onclick = () => wrap.scrollIntoView({ behavior: "smooth", block: "start" });
+  item.onclick = () =>
+    wrap.scrollIntoView({ behavior: "smooth", block: "start" });
+  pzThumbDnD(thumbs, item);
   thumbs.appendChild(item);
   await page.render({ canvasContext: tc.getContext("2d"), viewport: tvp })
     .promise;
 }
 
-// Pan-drag, ctrl+wheel zoom and the current-page tracker, bound once on
-// the workspace scroll container (the parent of #pz-pages).
+// Drag & drop page reordering in the thumbnail rail. On drop the new
+// order is sent to Rust (window.pzNotify), which runs the reorder
+// operation and re-renders.
+function pzThumbDnD(thumbs, item) {
+  const E = window.pzEd;
+  item.addEventListener("dragstart", (e) => {
+    E.dragThumb = item;
+    item.classList.add("dragging");
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", item.dataset.page);
+  });
+  item.addEventListener("dragend", () => {
+    item.classList.remove("dragging");
+    E.dragThumb = null;
+  });
+  if (thumbs.dataset.pzDnd) return;
+  thumbs.dataset.pzDnd = "1";
+  const orderBefore = () =>
+    [...thumbs.querySelectorAll(".pz-thumb")].map((c) => c.dataset.page).join(",");
+  let startOrder = "";
+  thumbs.addEventListener("dragenter", () => {
+    if (!startOrder) startOrder = orderBefore();
+  });
+  thumbs.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    const drag = E.dragThumb;
+    if (!drag) return;
+    const others = [...thumbs.querySelectorAll(".pz-thumb:not(.dragging)")];
+    const next = others.find(
+      (c) => e.clientY < c.getBoundingClientRect().top + c.offsetHeight / 2,
+    );
+    if (next) thumbs.insertBefore(drag, next);
+    else thumbs.appendChild(drag);
+  });
+  thumbs.addEventListener("drop", (e) => {
+    e.preventDefault();
+    const order = orderBefore();
+    if (startOrder && order !== startOrder && window.pzNotify) {
+      window.pzNotify("reorder:" + order);
+    }
+    startOrder = "";
+  });
+}
+
+// Pan-drag, ctrl+wheel zoom, ruler redraw and the current-page tracker,
+// bound once on the workspace scroll container (parent of #pz-pages).
 function pzBindScroller(container) {
   const sc = container.parentElement;
   if (!sc || sc.dataset.pzBound) return;
@@ -167,6 +252,7 @@ function pzBindScroller(container) {
     raf = requestAnimationFrame(() => {
       raf = 0;
       pzTrackPage(sc);
+      pzDrawRulers();
     });
   });
 }
@@ -190,8 +276,87 @@ function pzIndicate(current, total) {
   });
 }
 
-// 'in' | 'out' | 'fit'. Re-renders every page at the new scale and rescales
-// stored annotations so drawings stay glued to the page content.
+// ---- views: ruler + grid ----
+
+function pzView(kind, on) {
+  const container = document.getElementById("pz-pages");
+  if (!container) return false;
+  const sc = container.parentElement;
+  const wrap = sc && sc.parentElement;
+  if (kind === "grid") container.classList.toggle("pz-grid-on", on);
+  if (kind === "ruler" && wrap) {
+    wrap.classList.toggle("ed-rulers", on);
+    pzDrawRulers();
+  }
+  return true;
+}
+
+// Rulers show PDF points, anchored to the first page's top-left corner.
+function pzDrawRulers() {
+  const E = window.pzEd;
+  const h = document.getElementById("pz-ruler-h");
+  const v = document.getElementById("pz-ruler-v");
+  const container = document.getElementById("pz-pages");
+  if (!h || !v || !container) return;
+  const sc = container.parentElement;
+  const wrap = sc.parentElement;
+  if (!wrap.classList.contains("ed-rulers")) return;
+  const p = E.pages[1];
+  const style = getComputedStyle(document.documentElement);
+  const ink = "rgba(154,164,184,0.9)";
+  for (const [canvas, horiz] of [
+    [h, true],
+    [v, false],
+  ]) {
+    const cw = canvas.clientWidth || 1;
+    const ch = canvas.clientHeight || 1;
+    canvas.width = cw;
+    canvas.height = ch;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, cw, ch);
+    if (!p) continue;
+    const scRect = sc.getBoundingClientRect();
+    const pRect = p.wrap.getBoundingClientRect();
+    const origin = horiz ? pRect.left - scRect.left : pRect.top - scRect.top;
+    const span = horiz ? cw : ch;
+    const scale = p.scale; // px per PDF point
+    const step = scale >= 1.5 ? 10 : scale >= 0.7 ? 25 : 50;
+    ctx.strokeStyle = ink;
+    ctx.fillStyle = ink;
+    ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
+    ctx.beginPath();
+    const first = Math.floor(-origin / (step * scale)) * step;
+    for (let pt = first; ; pt += step) {
+      const at = origin + pt * scale;
+      if (at > span) break;
+      if (at < 0) continue;
+      const major = pt % (step * 5) === 0;
+      const len = major ? 10 : 5;
+      if (horiz) {
+        ctx.moveTo(at, ch);
+        ctx.lineTo(at, ch - len);
+        if (major) ctx.fillText(String(pt), at + 2, 9);
+      } else {
+        ctx.moveTo(cw, at);
+        ctx.lineTo(cw - len, at);
+        if (major) {
+          ctx.save();
+          ctx.translate(9, at + 2);
+          ctx.rotate(-Math.PI / 2);
+          ctx.fillText(String(pt), -ctx.measureText(String(pt)).width, 0);
+          ctx.restore();
+        }
+      }
+    }
+    ctx.stroke();
+  }
+  void style;
+}
+
+// ---- zoom ----
+
+// 'in' | 'out' | 'fit'. Re-renders every page at the new scale and
+// rescales stored annotations so drawings stay glued to the content.
 async function pzZoom(action) {
   const E = window.pzEd;
   if (E.zooming || !E.doc) return Math.round(E.zoom * 100);
@@ -212,30 +377,43 @@ async function pzZoom(action) {
       const vp = page.getViewport({ scale: newScale });
       p.wrap.style.width = vp.width + "px";
       p.wrap.style.height = vp.height + "px";
+      p.wrap.style.setProperty("--scale-factor", newScale);
       p.canvas.width = vp.width;
       p.canvas.height = vp.height;
+      p.under.width = vp.width;
+      p.under.height = vp.height;
       p.overlay.width = vp.width;
       p.overlay.height = vp.height;
       await page.render({
         canvasContext: p.canvas.getContext("2d"),
         viewport: vp,
       }).promise;
-      for (const s of window.pzEd.strokes[n] || []) {
+      for (const s of E.strokes[n] || []) {
         s.size *= ratio;
         s.points = s.points.map(([x, y]) => [x * ratio, y * ratio]);
       }
-      for (const im of window.pzEd.images[n] || []) {
+      for (const im of E.images[n] || []) {
         im.x *= ratio;
         im.y *= ratio;
         im.w *= ratio;
         im.h *= ratio;
       }
-      for (const t of window.pzEd.texts[n] || []) {
+      for (const r of E.rects[n] || []) {
+        r.x *= ratio;
+        r.y *= ratio;
+        r.w *= ratio;
+        r.h *= ratio;
+      }
+      for (const t of E.texts[n] || []) {
         t.x *= ratio;
         t.y *= ratio;
         t.size *= ratio;
+        t.el.style.left = t.x + "px";
+        t.el.style.top = t.y + "px";
+        t.el.style.fontSize = t.size + "px";
       }
       p.scale = newScale;
+      p.uctx = p.under.getContext("2d");
       p.ctx = p.overlay.getContext("2d");
       pzRedraw(n);
     }
@@ -244,14 +422,28 @@ async function pzZoom(action) {
   }
   const el = document.getElementById("pz-zoomlvl");
   if (el) el.textContent = Math.round(z * 100) + "%";
+  const grid = document.getElementById("pz-pages");
+  if (grid && E.pages[1]) {
+    grid.style.setProperty("--pz-grid", E.pages[1].scale * 24 + "px");
+  }
+  pzDrawRulers();
   return Math.round(z * 100);
 }
 
-function pzPos(overlay, ev) {
-  const r = overlay.getBoundingClientRect();
+// ---- pointer handling ----
+
+function pzPos(el, ev) {
+  const r = el.getBoundingClientRect();
   return [ev.clientX - r.left, ev.clientY - r.top];
 }
 
+function pzPushHistory(entry) {
+  const E = window.pzEd;
+  E.history.push(entry);
+  E.redo = [];
+}
+
+// Drawing tools (pen/highlight/image) — pointer events on the top overlay.
 function pzHook(overlay, n) {
   const E = window.pzEd;
   let stroke = null;
@@ -263,18 +455,13 @@ function pzHook(overlay, n) {
     const [x, y] = pzPos(overlay, ev);
     if (E.tool.mode === "image" && E.staged) {
       rectStart = [x, y];
-    } else if (E.tool.mode === "text" && E.stagedText) {
-      (E.texts[n] = E.texts[n] || []).push({
-        ...E.stagedText,
-        x,
-        y,
-      });
-      E.history.push({ type: "text", page: n });
-      E.stagedText = null;
-      E.tool.mode = "pen";
-      pzRedraw(n);
-    } else {
-      stroke = { color: E.tool.color, size: E.tool.size, points: [[x, y]] };
+    } else if (E.tool.mode === "pen" || E.tool.mode === "highlight") {
+      stroke = {
+        color: E.tool.color,
+        size: E.tool.size,
+        opacity: E.tool.opacity,
+        points: [[x, y]],
+      };
     }
   });
 
@@ -286,6 +473,8 @@ function pzHook(overlay, n) {
       if ((x - lx) ** 2 + (y - ly) ** 2 < 4) return; // thin out points
       pts.push([x, y]);
       const ctx = E.pages[n].ctx;
+      ctx.save();
+      ctx.globalAlpha = stroke.opacity;
       ctx.strokeStyle = stroke.color;
       ctx.lineWidth = stroke.size;
       ctx.lineCap = "round";
@@ -293,6 +482,7 @@ function pzHook(overlay, n) {
       ctx.moveTo(lx, ly);
       ctx.lineTo(x, y);
       ctx.stroke();
+      ctx.restore();
     } else if (rectStart) {
       pzRedraw(n);
       const ctx = E.pages[n].ctx;
@@ -313,7 +503,7 @@ function pzHook(overlay, n) {
     const [x, y] = pzPos(overlay, ev);
     if (stroke) {
       (E.strokes[n] = E.strokes[n] || []).push(stroke);
-      E.history.push({ type: "stroke", page: n });
+      pzPushHistory({ type: "stroke", page: n });
       pzRedraw(n);
       stroke = null;
     } else if (rectStart) {
@@ -336,9 +526,9 @@ function pzHook(overlay, n) {
           w,
           h,
         });
-        E.history.push({ type: "image", page: n });
+        pzPushHistory({ type: "image", page: n });
         E.staged = null;
-        E.tool.mode = "pen";
+        pzSetTool("cursor", E.tool.color, E.tool.size, 1);
       }
       rectStart = null;
       pzRedraw(n);
@@ -351,23 +541,146 @@ function pzHook(overlay, n) {
   });
 }
 
+// Cursor/text tools — clicks that reach the page wrap (the overlay is
+// pointer-transparent in those modes).
+function pzHookWrap(wrap, n) {
+  const E = window.pzEd;
+  wrap.addEventListener("click", (ev) => {
+    const mode = E.tool.mode;
+    if (ev.target.closest(".pz-text")) return; // handled by the box itself
+    const span = ev.target.closest(".pz-textlayer span");
+    if (span && span.textContent.trim() && (mode === "cursor" || mode === "text")) {
+      pzRetype(n, span);
+      return;
+    }
+    if (mode === "text") {
+      const [x, y] = pzPos(E.pages[n].overlay, ev);
+      const size = E.tool.size;
+      const rec = pzMakeText(n, x, y - size * 0.5, {
+        text: "",
+        size,
+        color: E.tool.color,
+      });
+      pzPushHistory({ type: "text", page: n, obj: rec });
+      rec.el.focus();
+    }
+  });
+}
+
+// ---- live text objects ----
+
+function pzMakeText(n, x, y, opts) {
+  const E = window.pzEd;
+  const p = E.pages[n];
+  const el = document.createElement("div");
+  el.className = "pz-text";
+  el.contentEditable = "true";
+  el.spellcheck = false;
+  el.style.left = x + "px";
+  el.style.top = y + "px";
+  el.style.fontSize = opts.size + "px";
+  el.style.color = opts.color;
+  el.textContent = opts.text || "";
+  const rec = { el, x, y, size: opts.size, color: opts.color };
+  el.addEventListener("blur", () => {
+    if (!el.innerText.trim()) pzRemoveText(n, rec, true);
+  });
+  el.addEventListener("pointerdown", (ev) => pzTextPointer(ev, n, rec));
+  p.wrap.insertBefore(el, p.overlay);
+  (E.texts[n] = E.texts[n] || []).push(rec);
+  return rec;
+}
+
+function pzRemoveText(n, rec, alsoHistory) {
+  const E = window.pzEd;
+  rec.el.remove();
+  const arr = E.texts[n] || [];
+  const i = arr.indexOf(rec);
+  if (i >= 0) arr.splice(i, 1);
+  if (alsoHistory) {
+    E.history = E.history.filter((h) => h.obj !== rec && (!h.obj || h.obj.box !== rec));
+  }
+}
+
+// Cursor tool: drag moves the box; a plain click falls through to focus.
+function pzTextPointer(ev, n, rec) {
+  const E = window.pzEd;
+  if (E.tool.mode !== "cursor" && E.tool.mode !== "text") return;
+  if (document.activeElement === rec.el) return; // editing — let the caret work
+  const startX = ev.clientX;
+  const startY = ev.clientY;
+  const origX = rec.x;
+  const origY = rec.y;
+  let moved = false;
+  const onMove = (mv) => {
+    const dx = mv.clientX - startX;
+    const dy = mv.clientY - startY;
+    if (!moved && dx * dx + dy * dy < 16) return;
+    moved = true;
+    rec.x = origX + dx;
+    rec.y = origY + dy;
+    rec.el.style.left = rec.x + "px";
+    rec.el.style.top = rec.y + "px";
+  };
+  const onUp = () => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    if (moved) rec.el.blur();
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+}
+
+// Cover & retype: white-out the detected text and drop an editable box
+// with the same content on top. Works best on white backgrounds.
+function pzRetype(n, span) {
+  const E = window.pzEd;
+  const p = E.pages[n];
+  const wr = p.wrap.getBoundingClientRect();
+  const sr = span.getBoundingClientRect();
+  const x = sr.left - wr.left;
+  const y = sr.top - wr.top;
+  const fs = parseFloat(getComputedStyle(span).fontSize) || sr.height * 0.9;
+  const rect = {
+    x: x - 2,
+    y: y - 2,
+    w: sr.width + 4,
+    h: sr.height + 4,
+    spanEl: span,
+  };
+  (E.rects[n] = E.rects[n] || []).push(rect);
+  span.style.visibility = "hidden";
+  pzRedraw(n);
+  const rec = pzMakeText(n, x, y, {
+    text: span.textContent,
+    size: fs,
+    color: "#000000",
+  });
+  pzPushHistory({ type: "retype", page: n, obj: { box: rec, rect } });
+  rec.el.focus();
+  return true;
+}
+
+// ---- rendering ----
+
 function pzRedraw(n) {
   const E = window.pzEd;
   const p = E.pages[n];
-  p.ctx.clearRect(0, 0, p.overlay.width, p.overlay.height);
+  // Under layer: white-outs, then image previews.
+  p.uctx.clearRect(0, 0, p.under.width, p.under.height);
+  for (const r of E.rects[n] || []) {
+    p.uctx.fillStyle = "#ffffff";
+    p.uctx.fillRect(r.x, r.y, r.w, r.h);
+  }
   for (const im of E.images[n] || []) {
     const bmp = E.bitmaps[im.id];
-    if (bmp) p.ctx.drawImage(bmp, im.x, im.y, im.w, im.h);
+    if (bmp) p.uctx.drawImage(bmp, im.x, im.y, im.w, im.h);
   }
-  for (const t of E.texts[n] || []) {
-    p.ctx.fillStyle = t.color;
-    p.ctx.font = t.size + "px Helvetica, Arial, sans-serif";
-    p.ctx.textBaseline = "alphabetic";
-    t.text.split("\n").forEach((line, i) => {
-      p.ctx.fillText(line, t.x, t.y + i * t.size * 1.25);
-    });
-  }
+  // Ink layer.
+  p.ctx.clearRect(0, 0, p.overlay.width, p.overlay.height);
   for (const s of E.strokes[n] || []) {
+    p.ctx.save();
+    p.ctx.globalAlpha = s.opacity == null ? 1 : s.opacity;
     p.ctx.strokeStyle = s.color;
     p.ctx.lineWidth = s.size;
     p.ctx.lineCap = "round";
@@ -378,21 +691,32 @@ function pzRedraw(n) {
     );
     if (s.points.length === 1) p.ctx.lineTo(s.points[0][0], s.points[0][1]);
     p.ctx.stroke();
+    p.ctx.restore();
   }
 }
 
-function pzSetTool(mode, color, size) {
+// ---- tools ----
+
+function pzApplyMode() {
   const E = window.pzEd;
-  E.tool = { mode, color, size };
-  if (mode !== "image") E.staged = null;
-  const pan = mode === "pan";
+  const mode = E.tool.mode;
+  const drawing = mode === "pen" || mode === "highlight" || mode === "image";
   for (const p of E.pages) {
-    if (p) p.overlay.style.pointerEvents = pan ? "none" : "auto";
+    if (p) p.overlay.style.pointerEvents = drawing ? "auto" : "none";
   }
   const container = document.getElementById("pz-pages");
   if (container && container.parentElement) {
-    container.parentElement.classList.toggle("pz-panning", pan);
+    const sc = container.parentElement;
+    sc.dataset.pzMode = mode;
+    sc.classList.toggle("pz-panning", mode === "pan");
   }
+}
+
+function pzSetTool(mode, color, size, opacity) {
+  const E = window.pzEd;
+  E.tool = { mode, color, size, opacity: opacity == null ? 1 : opacity };
+  if (mode !== "image") E.staged = null;
+  pzApplyMode();
   return true;
 }
 
@@ -408,33 +732,68 @@ async function pzStageImageB64(id, b64) {
 async function pzStageBlob(id, blob) {
   const E = window.pzEd;
   E.bitmaps[id] = await createImageBitmap(blob);
+  pzSetTool("image", E.tool.color, E.tool.size, 1);
   E.staged = id;
-  pzSetTool("image", E.tool.color, E.tool.size);
-  E.staged = id; // pzSetTool clears staged for other modes; keep it
   return true;
 }
 
-function pzStageText(text, color, size) {
-  const E = window.pzEd;
-  E.stagedText = { text, color, size };
-  pzSetTool("text", color, E.tool.size);
-  return true;
-}
+// ---- undo / redo ----
 
 function pzUndo() {
   const E = window.pzEd;
   const last = E.history.pop();
   if (!last) return false;
-  const list =
-    last.type === "stroke"
-      ? E.strokes
-      : last.type === "text"
-        ? E.texts
-        : E.images;
-  (list[last.page] || []).pop();
-  pzRedraw(last.page);
+  const n = last.page;
+  if (last.type === "stroke") {
+    const obj = (E.strokes[n] || []).pop();
+    E.redo.push({ ...last, payload: obj });
+  } else if (last.type === "image") {
+    const obj = (E.images[n] || []).pop();
+    E.redo.push({ ...last, payload: obj });
+  } else if (last.type === "text") {
+    pzRemoveText(n, last.obj, false);
+    E.redo.push(last);
+  } else if (last.type === "retype") {
+    pzRemoveText(n, last.obj.box, false);
+    const arr = E.rects[n] || [];
+    const i = arr.indexOf(last.obj.rect);
+    if (i >= 0) arr.splice(i, 1);
+    if (last.obj.rect.spanEl) last.obj.rect.spanEl.style.visibility = "";
+    E.redo.push(last);
+  }
+  pzRedraw(n);
   return true;
 }
+
+function pzRedo() {
+  const E = window.pzEd;
+  const last = E.redo.pop();
+  if (!last) return false;
+  const n = last.page;
+  if (last.type === "stroke") {
+    (E.strokes[n] = E.strokes[n] || []).push(last.payload);
+    E.history.push({ type: "stroke", page: n });
+  } else if (last.type === "image") {
+    (E.images[n] = E.images[n] || []).push(last.payload);
+    E.history.push({ type: "image", page: n });
+  } else if (last.type === "text") {
+    const rec = last.obj;
+    E.pages[n].wrap.insertBefore(rec.el, E.pages[n].overlay);
+    (E.texts[n] = E.texts[n] || []).push(rec);
+    E.history.push(last);
+  } else if (last.type === "retype") {
+    const { box, rect } = last.obj;
+    if (rect.spanEl) rect.spanEl.style.visibility = "hidden";
+    (E.rects[n] = E.rects[n] || []).push(rect);
+    E.pages[n].wrap.insertBefore(box.el, E.pages[n].overlay);
+    (E.texts[n] = E.texts[n] || []).push(box);
+    E.history.push(last);
+  }
+  pzRedraw(n);
+  return true;
+}
+
+// ---- export ----
 
 // Annotations in PDF coordinates (points, origin bottom-left).
 function pzExport() {
@@ -446,6 +805,7 @@ function pzExport() {
     const strokes = (E.strokes[n] || []).map((s) => ({
       color: s.color,
       width: s.size / p.scale,
+      opacity: s.opacity == null ? 1 : s.opacity,
       points: s.points.map(([x, y]) => [x / p.scale, p.pdfH - y / p.scale]),
     }));
     const images = (E.images[n] || []).map((im) => ({
@@ -457,15 +817,26 @@ function pzExport() {
         im.h / p.scale,
       ],
     }));
-    const texts = (E.texts[n] || []).map((t) => ({
-      text: t.text,
-      color: t.color,
-      size: t.size / p.scale,
-      x: t.x / p.scale,
-      y: p.pdfH - t.y / p.scale,
+    const texts = (E.texts[n] || [])
+      .filter((t) => t.el.innerText.trim())
+      .map((t) => ({
+        text: t.el.innerText.replace(/\n+$/, ""),
+        color: t.color,
+        size: t.size / p.scale,
+        x: t.x / p.scale,
+        y: p.pdfH - (t.y + t.size * 0.85) / p.scale,
+      }));
+    const rects = (E.rects[n] || []).map((r) => ({
+      rect: [
+        r.x / p.scale,
+        p.pdfH - (r.y + r.h) / p.scale,
+        r.w / p.scale,
+        r.h / p.scale,
+      ],
+      color: [255, 255, 255],
     }));
-    if (strokes.length || images.length || texts.length)
-      out.push({ page: n, strokes, images, texts });
+    if (strokes.length || images.length || texts.length || rects.length)
+      out.push({ page: n, strokes, images, texts, rects });
   }
   return out;
 }

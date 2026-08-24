@@ -20,3 +20,22 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # Same script contributors run locally — one definition of "green".
       - run: ./scripts/verify.sh
+
+  ui-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dioxus-cli
+        run: cargo install cargo-binstall && cargo binstall -y dioxus-cli@0.7.10
+      - name: Playwright browsers
+        working-directory: tests/ui
+        run: npm install --no-fund --no-audit && npx playwright install --with-deps chromium
+      # Builds the release wasm bundle, then drives it in headless Chromium.
+      - run: ./scripts/ui-test.sh

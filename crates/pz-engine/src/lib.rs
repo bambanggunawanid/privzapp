@@ -267,7 +267,7 @@ Fill in name/short_name and colors in site.webmanifest.
     }
 }
 
-pub use pz_pdf::{PlacedText, Stroke};
+pub use pz_pdf::{PlacedRect, PlacedText, Stroke};
 
 /// An image the editor placed on a page, still in its original format.
 /// `rect` is (x, y, width, height) in PDF points, y = bottom edge.
@@ -285,6 +285,7 @@ pub struct PageEdit {
     pub strokes: Vec<Stroke>,
     pub images: Vec<EditImage>,
     pub texts: Vec<PlacedText>,
+    pub rects: Vec<PlacedRect>,
 }
 
 /// The PDF editor's apply step: convert placed images to embeddable JPEGs
@@ -316,6 +317,7 @@ pub fn edit_pdf(
             strokes: edit.strokes,
             images,
             texts: edit.texts,
+            rects: edit.rects,
         });
     }
     pz_pdf::annotate(name, pdf, &converted)
