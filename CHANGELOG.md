@@ -1,0 +1,89 @@
+# Changelog
+
+All notable changes to PrivZapp. Format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
+[SemVer](https://semver.org). Every user-visible change lands here in the
+same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
+
+## [Unreleased]
+
+### Added
+- **PDF editor** (30 tools total): draw and sign by hand with a brush
+  (pressure-thinned vector ink, color/size controls), stamp images by
+  dragging a rectangle, undo, then bake everything into the PDF on-device.
+  Pages render via a locally bundled PDF.js (display only — all mutation
+  is pure Rust; ADR-0007).
+- Twelve more tools (29 total), closing most of the gap to iLovePDF/
+  iLoveIMG: Add Page Numbers, Crop PDF, PDF to Text, Repair PDF,
+  Protect PDF (standard AES-256 PDF encryption — opens in any viewer)
+  and Unlock PDF; Rotate, Flip, Upscale (2x/4x Lanczos), Grayscale,
+  Blur and Watermark Image (embedded Liberation Sans, SIL OFL 1.1).
+- Eight new tools (17 total): Images to PDF, Watermark PDF, Reorder PDF,
+  Strip Metadata (EXIF), Crop Image, Batch Rename, Encrypt File and
+  Decrypt File (new "Protect" category).
+- Password vaults: AES-256-GCM `.pzv` format with PBKDF2-HMAC-SHA256
+  (600k rounds) key derivation in `pz-crypto`.
+- Drag-and-drop onto the tool page dropzone.
+- PWA: web manifest, offline service worker and app icons; the release
+  bundle is installable and works with the network unplugged.
+- `scripts/verify.sh` (fmt/clippy/tests/wasm check) and
+  `scripts/build-web.sh` (release bundle + PWA files).
+- Self-hosting: multi-stage `Dockerfile` (Rust/dx build → nginx static
+  serving, access logs off) and `docker-compose.yml` compatible with
+  Docker Compose, Podman Compose and Portainer stacks.
+- Android: `scripts/build-android.sh` produces an installable APK
+  (arm64 + x86_64, release-optimized Rust, debug-signed for testing;
+  bundle id `app.privzapp`).
+
+- SEO: every route is now prerendered at build time (`tools/seo-gen`) with
+  unique titles, meta descriptions, canonicals, Open Graph tags, JSON-LD
+  (WebApplication + FAQPage) and crawlable FAQ content, plus sitemap.xml,
+  robots.txt and a 1200×630 social card. Tool pages show the same FAQ and
+  related-tools sections in-app; copy lives in `pz_core::seo`
+  (test-enforced).
+
+- Live before/after preview on Compress Image and Convert Image: result
+  image plus size savings, updating as quality/format changes.
+- Favicon Generator (31 tools): any PNG/JPG becomes a standard favicon
+  pack ZIP — multi-size favicon.ico, all PNG sizes, apple-touch-icon,
+  site.webmanifest and a README with the paste-in HTML snippet.
+- PDF editor: Add Text tool — type multi-line text, pick size (pen
+  color applies), tap the page to place it; baked into the PDF as real
+  Helvetica text. (Rewriting text already inside a PDF needs font
+  re-embedding/reflow and stays out of scope — same as iLovePDF.)
+- PDF editor is now a full workspace: besides drawing/signing and image
+  stamps, you can rotate, add page numbers, watermark, crop margins,
+  reorganize/delete/duplicate pages and append another PDF — each
+  operation applies to the working copy and returns to the editor, with
+  operation-level undo. Export downloads plain, compressed, or AES-256
+  password-protected. Pending drawings are baked automatically before
+  document operations.
+
+### Fixed
+- Refreshing any page flashed unstyled prerender content: the app
+  stylesheet is now linked statically in prerendered pages, and a dark
+  splash screen (pulsing logo) covers loading until the app mounts,
+  with an 8s no-wasm fallback that reveals the styled content.
+- PDF editor failed silently on open (errors weren't shown on the
+  chooser screen; large files broke the JS handoff — now blob URLs).
+- nginx served `.mjs` without a JavaScript MIME type, blocking the
+  editor's PDF.js module import entirely.
+- Prerendered SEO content stayed visible above the app after load.
+
+### Changed
+- Support page now links the real donation accounts (Ko-fi and GitHub
+  Sponsors); the Liberapay placeholder is gone.
+- Quality sliders move in steps of 10 (10–100).
+- Official bolt-P logo everywhere: app icon set (incl. maskable and
+  apple-touch), favicon, nav brand and README, all derived from
+  `app/brand/logo-master.png` by `scripts/gen-icons.py`.
+
+## [0.1.0] — 2026-08-24
+
+### Added
+- Initial release: Cargo workspace with pure engine crates
+  (`pz-core`, `pz-pdf`, `pz-img`, `pz-archive`, `pz-crypto`,
+  `pz-telemetry`, `pz-engine`) and a Dioxus 0.7 app (web/desktop/mobile).
+- Nine tools: Merge/Split/Rotate/Compress PDF, Convert/Resize/Compress
+  Image, Create/Extract ZIP.
+- All processing on-device; engine crates compile for native and wasm32.
