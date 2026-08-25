@@ -298,6 +298,40 @@ test.describe("editor workspace", () => {
     await expect(page.locator(".pz-thumb")).toHaveCount(2);
   });
 
+  test("redaction really removes the text, not just covers it", async ({ page }) => {
+    await openPdf(page);
+    await expect(page.locator(".pz-textlayer").first()).toContainText("Hello PrivZapp", {
+      timeout: 15_000,
+    });
+    // Drag a redaction box over the headline.
+    await page.locator('button[title^="Redact"]').click();
+    const span = page.locator(".pz-textlayer span", { hasText: "Hello PrivZapp" }).first();
+    const sb = await span.boundingBox();
+    await page.mouse.move(sb.x - 8, sb.y - 8);
+    await page.mouse.down();
+    await page.mouse.move(sb.x + sb.width + 8, sb.y + sb.height + 8, { steps: 4 });
+    await page.mouse.up();
+    await expect(page.locator(".pz-redact")).toHaveCount(1);
+    // Any document operation bakes pending edits — after the re-render,
+    // PDF.js's own text layer must no longer contain the words at all.
+    await page.locator("button", { hasText: "Add page numbers" }).click();
+    await expect(page.locator(".ed-busybar")).toHaveCount(0, { timeout: 30_000 });
+    await expect(page.locator(".pz-page").first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(".pz-textlayer").first()).not.toContainText("Hello", {
+      timeout: 15_000,
+    });
+    // The second page's text is untouched.
+    await expect(page.locator(".pz-textlayer").nth(1)).toContainText("Second page");
+  });
+
+  test("export pages as PNG downloads a zip of rendered pages", async ({ page }) => {
+    await openPdf(page);
+    await page.locator("button", { hasText: "⬇ Export" }).click();
+    const download = page.waitForEvent("download");
+    await page.locator("button", { hasText: "Pages as PNG" }).click();
+    expect((await download).suggestedFilename()).toBe("sample-pages.zip");
+  });
+
   test("export downloads an edited PDF", async ({ page }) => {
     await openPdf(page);
     await page.locator("button", { hasText: "Export ↓" }).click();

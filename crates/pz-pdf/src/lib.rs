@@ -763,6 +763,571 @@ pub fn protect(
     })
 }
 
+// ---- true redaction --------------------------------------------------------
+//
+// A white/black box on top of text is NOT redaction: the glyphs stay in
+// the content stream and copy-paste straight out. Real redaction rewrites
+// the stream: every glyph whose extent intersects a redaction rect is
+// removed and replaced by a kerning adjustment of the same advance, so
+// surrounding text keeps its exact layout. Fonts we can't measure
+// (CID/Type0, width-less base fonts, negative Tf/Tz mirror text) are
+// handled conservatively — any show-op whose estimated extent touches a
+// rect is dropped whole, as is any form XObject whose placed BBox does.
+// Over-redaction is the acceptable failure mode; under-redaction never is.
+//
+// Known limitations (documented, not silent): raster IMAGE pixels under
+// the box are covered, not removed (scanned text needs OCR-aware
+// redaction), and annotation appearance streams are untouched — the
+// editor pipeline never produces them, but exotic inputs could.
+
+/// Affine matrix [a b c d e f]: (x,y) → (a·x + c·y + e, b·x + d·y + f).
+type Mat = [f32; 6];
+
+const MAT_ID: Mat = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+
+/// Apply `m` first, then `n`.
+fn mat_mul(m: Mat, n: Mat) -> Mat {
+    [
+        m[0] * n[0] + m[1] * n[2],
+        m[0] * n[1] + m[1] * n[3],
+        m[2] * n[0] + m[3] * n[2],
+        m[2] * n[1] + m[3] * n[3],
+        m[4] * n[0] + m[5] * n[2] + n[4],
+        m[4] * n[1] + m[5] * n[3] + n[5],
+    ]
+}
+
+fn mat_apply(m: Mat, x: f32, y: f32) -> (f32, f32) {
+    (m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5])
+}
+
+fn mat_translate(tx: f32, ty: f32) -> Mat {
+    [1.0, 0.0, 0.0, 1.0, tx, ty]
+}
+
+enum FontWidths {
+    /// Per-code advance widths (glyph space, thousandths) for 1-byte fonts.
+    Simple {
+        first: i64,
+        widths: Vec<f32>,
+        missing: f32,
+    },
+    /// No usable per-glyph geometry — treat intersecting ops conservatively.
+    Opaque,
+}
+
+fn resolve_dict<'a>(doc: &'a Document, obj: &'a Object) -> Option<&'a Dictionary> {
+    match obj {
+        Object::Reference(id) => doc.get_dictionary(*id).ok(),
+        Object::Dictionary(d) => Some(d),
+        _ => None,
+    }
+}
+
+fn resolve_array<'a>(doc: &'a Document, obj: &'a Object) -> Option<&'a Vec<Object>> {
+    match obj {
+        Object::Reference(id) => doc.get_object(*id).ok().and_then(|o| o.as_array().ok()),
+        Object::Array(a) => Some(a),
+        _ => None,
+    }
+}
+
+/// Form XObjects on the page: name → Some((Matrix, BBox)) or None when
+/// the BBox is unreadable. Text inside a form can't be rewritten in
+/// place (forms are commonly SHARED between pages, so editing one leaks
+/// the change everywhere) — an intersecting form is dropped whole
+/// instead. Image XObjects are not listed: their pixels aren't text and
+/// stay covered by the painted box (documented limitation for scans).
+fn page_form_xobjects(
+    doc: &Document,
+    page_id: ObjectId,
+) -> BTreeMap<Vec<u8>, Option<(Mat, [f32; 4])>> {
+    let mut out = BTreeMap::new();
+    let Ok((direct, ids)) = doc.get_page_resources(page_id) else {
+        return out;
+    };
+    let mut dicts: Vec<&Dictionary> = direct.into_iter().collect();
+    dicts.extend(ids.iter().filter_map(|id| doc.get_dictionary(*id).ok()));
+    for res in dicts {
+        let Some(xobjects) = res.get(b"XObject").ok().and_then(|o| resolve_dict(doc, o)) else {
+            continue;
+        };
+        for (name, obj) in xobjects.iter() {
+            let dict = match obj {
+                Object::Reference(id) => doc
+                    .get_object(*id)
+                    .ok()
+                    .and_then(|o| o.as_stream().ok())
+                    .map(|s| &s.dict),
+                Object::Stream(s) => Some(&s.dict),
+                _ => None,
+            };
+            let Some(d) = dict else { continue };
+            if d.get(b"Subtype").and_then(Object::as_name).ok() != Some(b"Form") {
+                continue;
+            }
+            let nums = |key: &[u8], len: usize| {
+                d.get(key)
+                    .ok()
+                    .and_then(|o| resolve_array(doc, o))
+                    .and_then(|a| {
+                        let v: Vec<f32> = a.iter().filter_map(|o| o.as_float().ok()).collect();
+                        (v.len() == len).then_some(v)
+                    })
+            };
+            let bbox = nums(b"BBox", 4).map(|v| [v[0], v[1], v[2], v[3]]);
+            let matrix = nums(b"Matrix", 6)
+                .map(|v| [v[0], v[1], v[2], v[3], v[4], v[5]])
+                .unwrap_or(MAT_ID);
+            out.entry(name.clone()).or_insert(bbox.map(|b| (matrix, b)));
+        }
+    }
+    out
+}
+
+/// Width tables for every font reachable from the page's resources.
+fn page_fonts(doc: &Document, page_id: ObjectId) -> BTreeMap<Vec<u8>, FontWidths> {
+    let mut out = BTreeMap::new();
+    let Ok((direct, ids)) = doc.get_page_resources(page_id) else {
+        return out;
+    };
+    let mut dicts: Vec<&Dictionary> = direct.into_iter().collect();
+    dicts.extend(ids.iter().filter_map(|id| doc.get_dictionary(*id).ok()));
+    for res in dicts {
+        let Some(fonts) = res.get(b"Font").ok().and_then(|o| resolve_dict(doc, o)) else {
+            continue;
+        };
+        for (name, obj) in fonts.iter() {
+            let Some(font) = resolve_dict(doc, obj) else {
+                continue;
+            };
+            out.entry(name.clone())
+                .or_insert_with(|| font_widths(doc, font));
+        }
+    }
+    out
+}
+
+fn font_widths(doc: &Document, font: &Dictionary) -> FontWidths {
+    if font.get(b"Subtype").and_then(Object::as_name).ok() == Some(b"Type0") {
+        return FontWidths::Opaque;
+    }
+    let first = font.get(b"FirstChar").and_then(Object::as_i64).ok();
+    let widths = font
+        .get(b"Widths")
+        .ok()
+        .and_then(|o| resolve_array(doc, o))
+        .map(|a| {
+            a.iter()
+                .map(|o| o.as_float().unwrap_or(500.0))
+                .collect::<Vec<f32>>()
+        });
+    let missing = font
+        .get(b"FontDescriptor")
+        .ok()
+        .and_then(|o| resolve_dict(doc, o))
+        .and_then(|d| d.get(b"MissingWidth").and_then(Object::as_float).ok())
+        .unwrap_or(500.0);
+    match (first, widths) {
+        (Some(first), Some(widths)) if !widths.is_empty() => FontWidths::Simple {
+            first,
+            widths,
+            missing,
+        },
+        _ => FontWidths::Opaque,
+    }
+}
+
+fn rects_hit(rects: &[(f32, f32, f32, f32)], bx: (f32, f32, f32, f32)) -> bool {
+    let (x0, y0, x1, y1) = bx;
+    rects
+        .iter()
+        .any(|&(rx, ry, rw, rh)| x0 < rx + rw && x1 > rx && y0 < ry + rh && y1 > ry)
+}
+
+/// One element of a text-showing operation.
+enum ShowElem {
+    Str(Vec<u8>),
+    Kern(f32),
+}
+
+/// Graphics/text state tracked while walking a content stream.
+struct Redactor {
+    ctm: Mat,
+    stack: Vec<Mat>,
+    tm: Mat,
+    tlm: Mat,
+    size: f32,
+    leading: f32,
+    tc: f32,
+    tw: f32,
+    th: f32,
+    font: Vec<u8>,
+}
+
+impl Redactor {
+    fn new() -> Self {
+        Self {
+            ctm: MAT_ID,
+            stack: Vec::new(),
+            tm: MAT_ID,
+            tlm: MAT_ID,
+            size: 0.0,
+            leading: 0.0,
+            tc: 0.0,
+            tw: 0.0,
+            th: 1.0,
+            font: Vec::new(),
+        }
+    }
+
+    fn num(op: &Operation, i: usize) -> f32 {
+        op.operands
+            .get(i)
+            .and_then(|o| o.as_float().ok())
+            .unwrap_or(0.0)
+    }
+
+    fn next_line(&mut self, tx: f32, ty: f32) {
+        self.tlm = mat_mul(mat_translate(tx, ty), self.tlm);
+        self.tm = self.tlm;
+    }
+
+    /// Device-space bounding box of a glyph run starting at the current
+    /// pen with the given text-space advance.
+    fn run_bbox(&self, adv: f32) -> (f32, f32, f32, f32) {
+        self.span_bbox(0.0, adv, -0.25 * self.size, 0.85 * self.size)
+    }
+
+    /// Device bbox of an arbitrary text-space span at the current pen.
+    fn span_bbox(&self, x0: f32, x1: f32, y0: f32, y1: f32) -> (f32, f32, f32, f32) {
+        let trm = mat_mul(self.tm, self.ctm);
+        let corners = [(x0, y0), (x1, y0), (x0, y1), (x1, y1)];
+        let mut bx = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for (x, y) in corners {
+            let (dx, dy) = mat_apply(trm, x, y);
+            bx = (bx.0.min(dx), bx.1.min(dy), bx.2.max(dx), bx.3.max(dy));
+        }
+        bx
+    }
+
+    fn advance(&mut self, adv: f32) {
+        self.tm = mat_mul(mat_translate(adv, 0.0), self.tm);
+    }
+
+    /// Process one show operation. Returns None when nothing was redacted
+    /// (caller keeps the original op) or the replacement TJ elements.
+    fn show(
+        &mut self,
+        elems: Vec<ShowElem>,
+        font: &FontWidths,
+        rects: &[(f32, f32, f32, f32)],
+    ) -> Option<Vec<Object>> {
+        if self.size == 0.0 || self.th == 0.0 {
+            // Size/scale of exactly zero renders nothing; keep as-is but
+            // still track advances for later ops.
+            for e in &elems {
+                if let ShowElem::Kern(n) = e {
+                    self.advance(-n / 1000.0 * self.size * self.th);
+                }
+            }
+            return None;
+        }
+        // NEGATIVE Tf size / Tz render mirrored-but-readable text; we
+        // don't model mirrored geometry — take the conservative path.
+        let font = if self.size < 0.0 || self.th < 0.0 {
+            &FontWidths::Opaque
+        } else {
+            font
+        };
+        // Tc/Tw/Tf can't change mid-op, so a snapshot is safe (and keeps
+        // the closure from borrowing `self` against the advances below).
+        let (size, tc, tw, th) = (self.size, self.tc, self.tw, self.th);
+        let glyph_adv = move |code: u8, w0: f32| {
+            (w0 / 1000.0 * size + tc + if code == 32 { tw } else { 0.0 }) * th
+        };
+        match font {
+            FontWidths::Simple {
+                first,
+                widths,
+                missing,
+            } => {
+                let mut out: Vec<Object> = Vec::new();
+                let mut kept: Vec<u8> = Vec::new();
+                let mut removed = 0.0f32;
+                let mut any = false;
+                let flush_kept = |out: &mut Vec<Object>, kept: &mut Vec<u8>| {
+                    if !kept.is_empty() {
+                        out.push(Object::String(
+                            std::mem::take(kept),
+                            lopdf::StringFormat::Literal,
+                        ));
+                    }
+                };
+                let size_th = self.size * self.th;
+                let flush_removed = move |out: &mut Vec<Object>, removed: &mut f32| {
+                    if *removed > 0.0 {
+                        out.push(Object::Real(-*removed * 1000.0 / size_th));
+                        *removed = 0.0;
+                    }
+                };
+                for e in elems {
+                    match e {
+                        ShowElem::Kern(n) => {
+                            flush_kept(&mut out, &mut kept);
+                            flush_removed(&mut out, &mut removed);
+                            out.push(Object::Real(n));
+                            self.advance(-n / 1000.0 * self.size * self.th);
+                        }
+                        ShowElem::Str(bytes) => {
+                            for code in bytes {
+                                // checked_sub + try_from: a hostile
+                                // /FirstChar can't overflow (panic in dev
+                                // builds) or truncate on 32-bit wasm into
+                                // a WRONG width — both fall back to
+                                // /MissingWidth.
+                                let w0 = (code as i64)
+                                    .checked_sub(*first)
+                                    .and_then(|idx| usize::try_from(idx).ok())
+                                    .and_then(|i| widths.get(i).copied())
+                                    .unwrap_or(*missing);
+                                let adv = glyph_adv(code, w0);
+                                if rects_hit(rects, self.run_bbox(adv)) {
+                                    any = true;
+                                    flush_kept(&mut out, &mut kept);
+                                    removed += adv;
+                                } else {
+                                    flush_removed(&mut out, &mut removed);
+                                    kept.push(code);
+                                }
+                                self.advance(adv);
+                            }
+                        }
+                    }
+                }
+                if !any {
+                    return None;
+                }
+                flush_kept(&mut out, &mut kept);
+                // Trailing compensation keeps the viewer's pen in sync for
+                // any ops that follow on the same line.
+                flush_removed(&mut out, &mut removed);
+                Some(out)
+            }
+            FontWidths::Opaque => {
+                // No per-glyph geometry: estimate the run extent (generous
+                // 0.6 em per byte) and drop the whole op on any contact.
+                // `signed` tracks the real pen direction; `extent` is its
+                // magnitude, tested SYMMETRICALLY around the pen so
+                // mirrored text (negative Tf/Tz) can't escape the box.
+                let mut signed = 0.0f32;
+                for e in &elems {
+                    match e {
+                        ShowElem::Str(bytes) => {
+                            for &code in bytes {
+                                signed += glyph_adv(code, 600.0);
+                            }
+                        }
+                        ShowElem::Kern(n) => signed += -n / 1000.0 * self.size * self.th,
+                    }
+                }
+                let extent = signed.abs();
+                let pad = 1.2 * self.size.abs();
+                let hit = rects_hit(rects, self.span_bbox(-extent, extent, -pad, pad));
+                self.advance(signed);
+                if hit {
+                    // Best-effort pen compensation for well-formed text;
+                    // skip it when the state is degenerate.
+                    let denom = self.size * self.th;
+                    if denom.is_finite() && denom != 0.0 {
+                        Some(vec![Object::Real(-signed * 1000.0 / denom)])
+                    } else {
+                        Some(vec![])
+                    }
+                } else {
+                    None
+                }
+            }
+        }
+    }
+}
+
+fn show_elems(op: &Operation) -> Vec<ShowElem> {
+    match op.operator.as_str() {
+        "TJ" => op
+            .operands
+            .first()
+            .and_then(|o| o.as_array().ok())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|o| match o {
+                        Object::String(s, _) => Some(ShowElem::Str(s.clone())),
+                        _ => o.as_float().ok().map(ShowElem::Kern),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        _ => op
+            .operands
+            .iter()
+            .rev()
+            .find_map(|o| o.as_str().ok())
+            .map(|s| vec![ShowElem::Str(s.to_vec())])
+            .unwrap_or_default(),
+    }
+}
+
+/// Rewrite a page's content stream with every glyph inside `rects` removed.
+fn redact_page_text(
+    doc: &mut Document,
+    page_id: ObjectId,
+    rects: &[(f32, f32, f32, f32)],
+) -> Result<(), PzError> {
+    let fonts = page_fonts(doc, page_id);
+    let forms = page_form_xobjects(doc, page_id);
+    let content = Content::decode(&doc.get_page_content(page_id))
+        .map_err(|e| PzError::Failed(format!("could not parse page content for redaction: {e}")))?;
+    let mut st = Redactor::new();
+    let mut out: Vec<Operation> = Vec::with_capacity(content.operations.len());
+    for op in content.operations {
+        match op.operator.as_str() {
+            "q" => {
+                st.stack.push(st.ctm);
+                out.push(op);
+            }
+            "Q" => {
+                st.ctm = st.stack.pop().unwrap_or(MAT_ID);
+                out.push(op);
+            }
+            "cm" => {
+                let m: Mat = std::array::from_fn(|i| Redactor::num(&op, i));
+                st.ctm = mat_mul(m, st.ctm);
+                out.push(op);
+            }
+            "BT" => {
+                st.tm = MAT_ID;
+                st.tlm = MAT_ID;
+                out.push(op);
+            }
+            "Tf" => {
+                st.font = op
+                    .operands
+                    .first()
+                    .and_then(|o| o.as_name().ok())
+                    .unwrap_or_default()
+                    .to_vec();
+                st.size = Redactor::num(&op, 1);
+                out.push(op);
+            }
+            "TL" => {
+                st.leading = Redactor::num(&op, 0);
+                out.push(op);
+            }
+            "Tc" => {
+                st.tc = Redactor::num(&op, 0);
+                out.push(op);
+            }
+            "Tw" => {
+                st.tw = Redactor::num(&op, 0);
+                out.push(op);
+            }
+            "Tz" => {
+                st.th = Redactor::num(&op, 0) / 100.0;
+                out.push(op);
+            }
+            "Td" => {
+                st.next_line(Redactor::num(&op, 0), Redactor::num(&op, 1));
+                out.push(op);
+            }
+            "TD" => {
+                st.leading = -Redactor::num(&op, 1);
+                st.next_line(Redactor::num(&op, 0), Redactor::num(&op, 1));
+                out.push(op);
+            }
+            "Tm" => {
+                let m: Mat = std::array::from_fn(|i| Redactor::num(&op, i));
+                st.tm = m;
+                st.tlm = m;
+                out.push(op);
+            }
+            "T*" => {
+                let l = st.leading;
+                st.next_line(0.0, -l);
+                out.push(op);
+            }
+            "Tj" | "TJ" | "'" | "\"" => {
+                if op.operator == "'" {
+                    let l = st.leading;
+                    st.next_line(0.0, -l);
+                    out.push(Operation::new("T*", vec![]));
+                } else if op.operator == "\"" {
+                    st.tw = Redactor::num(&op, 0);
+                    st.tc = Redactor::num(&op, 1);
+                    out.push(Operation::new("Tw", vec![st.tw.into()]));
+                    out.push(Operation::new("Tc", vec![st.tc.into()]));
+                    let l = st.leading;
+                    st.next_line(0.0, -l);
+                    out.push(Operation::new("T*", vec![]));
+                }
+                let font = fonts.get(&st.font).unwrap_or(&FontWidths::Opaque);
+                match st.show(show_elems(&op), font, rects) {
+                    None if op.operator == "'" || op.operator == "\"" => {
+                        // Already emitted the positioning; re-emit as Tj.
+                        if let Some(s) = op.operands.iter().rev().find_map(|o| o.as_str().ok()) {
+                            out.push(Operation::new(
+                                "Tj",
+                                vec![Object::String(s.to_vec(), lopdf::StringFormat::Literal)],
+                            ));
+                        }
+                    }
+                    None => out.push(op),
+                    Some(elems) if elems.is_empty() => {}
+                    Some(elems) => out.push(Operation::new("TJ", vec![Object::Array(elems)])),
+                }
+            }
+            "Do" => {
+                let name = op
+                    .operands
+                    .first()
+                    .and_then(|o| o.as_name().ok())
+                    .unwrap_or_default();
+                match forms.get(name) {
+                    // A form whose placed BBox touches a rect is dropped
+                    // whole — its (possibly shared) stream can hold text.
+                    Some(Some((fm, bb))) => {
+                        let m = mat_mul(*fm, st.ctm);
+                        let corners = [
+                            (bb[0], bb[1]),
+                            (bb[2], bb[1]),
+                            (bb[0], bb[3]),
+                            (bb[2], bb[3]),
+                        ];
+                        let mut bx = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+                        for (x, y) in corners {
+                            let (dx, dy) = mat_apply(m, x, y);
+                            bx = (bx.0.min(dx), bx.1.min(dy), bx.2.max(dx), bx.3.max(dy));
+                        }
+                        if !rects_hit(rects, bx) {
+                            out.push(op);
+                        }
+                    }
+                    // Form with an unreadable BBox: extent unknowable —
+                    // drop it (over-redaction is the safe direction).
+                    Some(None) => {}
+                    // Image or unknown XObject: kept, covered by the box.
+                    None => out.push(op),
+                }
+            }
+            _ => out.push(op),
+        }
+    }
+    let encoded = Content { operations: out }
+        .encode()
+        .map_err(|e| PzError::Failed(format!("could not rebuild page content: {e}")))?;
+    doc.change_page_content(page_id, encoded)
+        .map_err(|e| PzError::Failed(format!("could not write redacted content: {e}")))
+}
+
 /// A freehand ink stroke (signature / handwriting) in PDF coordinates
 /// (points, origin bottom-left). `opacity` below 1.0 renders with a
 /// Multiply blend (highlighter: text stays readable underneath).
@@ -817,6 +1382,9 @@ pub struct PageEdits {
     pub images: Vec<PlacedJpeg>,
     pub texts: Vec<PlacedText>,
     pub rects: Vec<PlacedRect>,
+    /// True-redaction boxes in PDF points (x, y bottom-left, w, h): text
+    /// inside is REMOVED from the content stream, then covered black.
+    pub redactions: Vec<(f32, f32, f32, f32)>,
 }
 
 /// Bake editor annotations (ink strokes and placed images) into the PDF.
@@ -844,6 +1412,7 @@ pub fn annotate(name: &str, bytes: &[u8], edits: &[PageEdits]) -> Result<OutputF
             && edit.images.is_empty()
             && edit.texts.is_empty()
             && edit.rects.is_empty()
+            && edit.redactions.is_empty()
         {
             continue;
         }
@@ -854,6 +1423,12 @@ pub fn annotate(name: &str, bytes: &[u8], edits: &[PageEdits]) -> Result<OutputF
             )));
         };
         applied = true;
+
+        // True redaction first: strip the glyphs from the content stream,
+        // then the black boxes below cover whatever else was in the area.
+        if !edit.redactions.is_empty() {
+            redact_page_text(&mut doc, page_id, &edit.redactions)?;
+        }
 
         // One ExtGState per distinct sub-1 opacity on this page: strokes
         // use a Multiply blend (highlighter keeps text readable), images
@@ -889,7 +1464,15 @@ pub fn annotate(name: &str, bytes: &[u8], edits: &[PageEdits]) -> Result<OutputF
         }
 
         let mut ops: Vec<Operation> = Vec::new();
-        for rect in &edit.rects {
+        let black_boxes: Vec<PlacedRect> = edit
+            .redactions
+            .iter()
+            .map(|&rect| PlacedRect {
+                rect,
+                color: (0, 0, 0),
+            })
+            .collect();
+        for rect in edit.rects.iter().chain(black_boxes.iter()) {
             let (r, g, b) = rect.color;
             let (x, y, w, h) = rect.rect;
             ops.push(Operation::new("q", vec![]));
@@ -1111,6 +1694,323 @@ mod tests {
 
     fn page_count(bytes: &[u8]) -> usize {
         Document::load_mem(bytes).unwrap().get_pages().len()
+    }
+
+    /// One-page PDF whose font carries a Widths table (every glyph 500,
+    /// so at size 24 each advances exactly 12 pt) — glyph-precise
+    /// redaction geometry becomes exact arithmetic. Text starts at
+    /// (100, 600).
+    fn measured_pdf(text: &str) -> Vec<u8> {
+        let mut doc = Document::with_version("1.5");
+        let pages_id = doc.new_object_id();
+        let widths: Vec<Object> = (0..95).map(|_| 500.into()).collect();
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Helvetica",
+            "FirstChar" => 32,
+            "LastChar" => 126,
+            "Widths" => widths,
+        });
+        let resources_id = doc.add_object(dictionary! {
+            "Font" => dictionary! { "F1" => font_id },
+        });
+        let content = Content {
+            operations: vec![
+                Operation::new("BT", vec![]),
+                Operation::new("Tf", vec!["F1".into(), 24.into()]),
+                Operation::new("Td", vec![100.into(), 600.into()]),
+                Operation::new("Tj", vec![Object::string_literal(text)]),
+                Operation::new("ET", vec![]),
+            ],
+        };
+        let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => content_id,
+            "Resources" => resources_id,
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![page_id.into()],
+                "Count" => 1,
+            }),
+        );
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        doc.trailer.set("Root", catalog_id);
+        let mut buf = Vec::new();
+        doc.save_to(&mut buf).unwrap();
+        buf
+    }
+
+    #[test]
+    fn redaction_removes_only_covered_glyphs() {
+        // "SECRET data": S..T occupy x = 100..172; the rect ends at 172,
+        // so the following space (172..184) and "data" survive.
+        let src = measured_pdf("SECRET data");
+        let out = annotate(
+            "doc.pdf",
+            &src,
+            &[PageEdits {
+                page: 1,
+                redactions: vec![(98.0, 590.0, 74.0, 40.0)],
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        let txt = extract_text("doc.pdf", &out.bytes).unwrap();
+        let s = String::from_utf8(txt.bytes).unwrap();
+        assert!(!s.contains("SECRET"), "redacted text extractable: {s}");
+        assert!(!s.contains('S'), "redacted glyph survived: {s}");
+        assert!(s.contains("data"), "kept text lost: {s}");
+
+        let doc = Document::load_mem(&out.bytes).unwrap();
+        let page = *doc.get_pages().get(&1).unwrap();
+        let content = Content::decode(&doc.get_page_content(page)).unwrap();
+        // Six 12-pt glyphs removed at size 24 → a -3000 kern keeps "data"
+        // exactly where it was.
+        let kern = content
+            .operations
+            .iter()
+            .filter(|op| op.operator == "TJ")
+            .filter_map(|op| op.operands.first()?.as_array().ok())
+            .flatten()
+            .filter_map(|o| o.as_float().ok())
+            .find(|n| *n < -100.0)
+            .expect("kern compensation missing");
+        assert!((kern + 3000.0).abs() < 1.0, "bad compensation: {kern}");
+        // And the opaque black box is painted over the area.
+        assert!(content
+            .operations
+            .iter()
+            .any(|op| op.operator == "re" && Redactor::num(op, 0) == 98.0));
+    }
+
+    #[test]
+    fn redaction_survives_hostile_first_char() {
+        // /FirstChar i64::MIN: the width lookup must fall back to
+        // MissingWidth instead of overflowing (dev-build panic) or
+        // truncating into a wrong width on 32-bit wasm.
+        let mut doc = Document::load_mem(&measured_pdf("SECRET data")).unwrap();
+        let font_id = *doc
+            .objects
+            .iter()
+            .find(|(_, o)| {
+                o.as_dict()
+                    .is_ok_and(|d| d.get(b"Type").and_then(Object::as_name).ok() == Some(b"Font"))
+            })
+            .map(|(id, _)| id)
+            .unwrap();
+        if let Ok(d) = doc.get_dictionary_mut(font_id) {
+            d.set("FirstChar", i64::MIN);
+        }
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        let out = annotate(
+            "doc.pdf",
+            &bytes,
+            &[PageEdits {
+                page: 1,
+                redactions: vec![(98.0, 590.0, 74.0, 40.0)],
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        let s = String::from_utf8(extract_text("doc.pdf", &out.bytes).unwrap().bytes).unwrap();
+        assert!(!s.contains("SECRET"), "hostile FirstChar leaked text: {s}");
+    }
+
+    #[test]
+    fn redaction_treats_negative_text_scale_conservatively() {
+        // Negative Tz mirrors text but it still renders and extracts;
+        // the conservative path must drop the intersecting run.
+        let mut doc = Document::load_mem(&measured_pdf("x")).unwrap();
+        let pages = doc.get_pages();
+        let page_id = *pages.get(&1).unwrap();
+        let content = Content {
+            operations: vec![
+                Operation::new("BT", vec![]),
+                Operation::new("Tf", vec!["F1".into(), 24.into()]),
+                Operation::new("Tz", vec![Object::Integer(-100)]),
+                Operation::new("Td", vec![300.into(), 600.into()]),
+                Operation::new("Tj", vec![Object::string_literal("MIRRORED")]),
+                Operation::new("ET", vec![]),
+            ],
+        };
+        doc.change_page_content(page_id, content.encode().unwrap())
+            .unwrap();
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        // With Tz -100 the run extends LEFT of the pen; a box on that
+        // side must still catch it (symmetric extent).
+        let out = annotate(
+            "doc.pdf",
+            &bytes,
+            &[PageEdits {
+                page: 1,
+                redactions: vec![(200.0, 590.0, 80.0, 40.0)],
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        if let Ok(t) = extract_text("doc.pdf", &out.bytes) {
+            let s = String::from_utf8(t.bytes).unwrap();
+            assert!(!s.contains("MIRRORED"), "mirrored text leaked: {s}");
+        }
+    }
+
+    /// Page that draws its text only through a form XObject at (100, 600).
+    fn form_pdf() -> Vec<u8> {
+        let mut doc = Document::with_version("1.5");
+        let pages_id = doc.new_object_id();
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Helvetica",
+        });
+        let form_content = Content {
+            operations: vec![
+                Operation::new("BT", vec![]),
+                Operation::new("Tf", vec!["F1".into(), 24.into()]),
+                Operation::new("Td", vec![0.into(), 10.into()]),
+                Operation::new("Tj", vec![Object::string_literal("TOPSECRET")]),
+                Operation::new("ET", vec![]),
+            ],
+        };
+        let form_id = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "XObject",
+                "Subtype" => "Form",
+                "BBox" => vec![0.into(), 0.into(), 200.into(), 50.into()],
+                "Resources" => dictionary! { "Font" => dictionary! { "F1" => font_id } },
+            },
+            form_content.encode().unwrap(),
+        ));
+        let page_content = Content {
+            operations: vec![
+                Operation::new("q", vec![]),
+                Operation::new(
+                    "cm",
+                    vec![
+                        1.into(),
+                        0.into(),
+                        0.into(),
+                        1.into(),
+                        100.into(),
+                        600.into(),
+                    ],
+                ),
+                Operation::new("Do", vec![Object::Name(b"Fx1".to_vec())]),
+                Operation::new("Q", vec![]),
+            ],
+        };
+        let content_id =
+            doc.add_object(Stream::new(dictionary! {}, page_content.encode().unwrap()));
+        let resources_id = doc.add_object(dictionary! {
+            "XObject" => dictionary! { "Fx1" => form_id },
+        });
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => content_id,
+            "Resources" => resources_id,
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![page_id.into()],
+                "Count" => 1,
+            }),
+        );
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        doc.trailer.set("Root", catalog_id);
+        let mut buf = Vec::new();
+        doc.save_to(&mut buf).unwrap();
+        buf
+    }
+
+    #[test]
+    fn redaction_drops_intersecting_form_xobjects() {
+        // Text hidden inside a form XObject must not survive a box over
+        // it: the whole Do is removed (forms can be shared, so they are
+        // never rewritten in place).
+        let hit = annotate(
+            "doc.pdf",
+            &form_pdf(),
+            &[PageEdits {
+                page: 1,
+                redactions: vec![(110.0, 605.0, 50.0, 30.0)],
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        let doc = Document::load_mem(&hit.bytes).unwrap();
+        let page = *doc.get_pages().get(&1).unwrap();
+        let content = Content::decode(&doc.get_page_content(page)).unwrap();
+        assert!(
+            !content.operations.iter().any(|op| op.operator == "Do"),
+            "intersecting form XObject survived"
+        );
+        // A box elsewhere leaves the form alone.
+        let miss = annotate(
+            "doc.pdf",
+            &form_pdf(),
+            &[PageEdits {
+                page: 1,
+                redactions: vec![(400.0, 100.0, 20.0, 20.0)],
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        let doc = Document::load_mem(&miss.bytes).unwrap();
+        let page = *doc.get_pages().get(&1).unwrap();
+        let content = Content::decode(&doc.get_page_content(page)).unwrap();
+        assert!(content.operations.iter().any(|op| op.operator == "Do"));
+    }
+
+    #[test]
+    fn redaction_without_widths_is_conservative() {
+        // The plain fixture's font has no Widths table: any contact drops
+        // the whole show-op (over-redaction is the safe failure mode).
+        let hit = annotate(
+            "doc.pdf",
+            &sample_pdf(1),
+            &[PageEdits {
+                page: 1,
+                redactions: vec![(150.0, 590.0, 30.0, 30.0)],
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        if let Ok(t) = extract_text("doc.pdf", &hit.bytes) {
+            let s = String::from_utf8(t.bytes).unwrap();
+            assert!(!s.contains("Page"), "text survived redaction: {s}");
+        }
+        // A box far away leaves the text alone.
+        let miss = annotate(
+            "doc.pdf",
+            &sample_pdf(1),
+            &[PageEdits {
+                page: 1,
+                redactions: vec![(400.0, 100.0, 50.0, 50.0)],
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        let s = String::from_utf8(extract_text("doc.pdf", &miss.bytes).unwrap().bytes).unwrap();
+        assert!(s.contains("Page 1"), "untouched text lost: {s}");
     }
 
     #[test]
@@ -1346,6 +2246,7 @@ mod tests {
                 bold: true,
             }],
             rects: vec![],
+            redactions: vec![],
         }];
         let out = annotate("doc.pdf", &sample_pdf(2), &edits).unwrap();
         assert_eq!(out.name, "doc-edited.pdf");
@@ -1374,6 +2275,7 @@ mod tests {
             images: vec![],
             texts: vec![],
             rects: vec![],
+            redactions: vec![],
         }];
         assert!(annotate("doc.pdf", &sample_pdf(1), &edits).is_ok());
     }
@@ -1400,6 +2302,7 @@ mod tests {
                 rect: (78.0, 496.0, 120.0, 16.0),
                 color: (255, 255, 255),
             }],
+            redactions: vec![],
         }];
         let out = annotate("doc.pdf", &sample_pdf(1), &edits).unwrap();
         let doc = Document::load_mem(&out.bytes).unwrap();
@@ -1431,6 +2334,7 @@ mod tests {
             images: vec![],
             texts: vec![],
             rects: vec![],
+            redactions: vec![],
         }];
         assert!(annotate("doc.pdf", &sample_pdf(1), &edits).is_err());
         assert!(annotate("doc.pdf", &sample_pdf(1), &[]).is_err());

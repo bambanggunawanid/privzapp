@@ -668,6 +668,20 @@ a:hover { text-decoration: underline; }
 .pz-img:hover { outline-color: rgba(108, 140, 255, 0.7); }
 .pz-img:focus-within,
 .pz-img:focus { outline: 1.5px solid #6c8cff; }
+/* Pending redaction: near-black so what's underneath stays faintly
+   visible until baked; red accents signal the destructive intent. */
+.pz-redact {
+  position: absolute;
+  z-index: 3;
+  cursor: move;
+  background: rgba(5, 5, 8, 0.82);
+  outline: 1.5px dashed rgba(225, 60, 60, 0.8);
+  outline-offset: 1px;
+}
+.pz-redact:hover,
+.pz-redact:focus { outline: 1.5px solid #e13c3c; }
+.pz-redact:hover .pz-obj-del,
+.pz-redact:focus .pz-obj-del { display: grid; }
 .pz-obj-del {
   position: absolute;
   top: -12px;
@@ -719,7 +733,13 @@ a:hover { text-decoration: underline; }
 .ed-canvas[data-pz-mode="pan"] .pz-text,
 .ed-canvas[data-pz-mode="pen"] .pz-img,
 .ed-canvas[data-pz-mode="highlight"] .pz-img,
-.ed-canvas[data-pz-mode="pan"] .pz-img { pointer-events: none; }
+.ed-canvas[data-pz-mode="pan"] .pz-img,
+.ed-canvas[data-pz-mode="redact"] .pz-text,
+.ed-canvas[data-pz-mode="redact"] .pz-img,
+.ed-canvas[data-pz-mode="pen"] .pz-redact,
+.ed-canvas[data-pz-mode="highlight"] .pz-redact,
+.ed-canvas[data-pz-mode="redact"] .pz-redact,
+.ed-canvas[data-pz-mode="pan"] .pz-redact { pointer-events: none; }
 .ed-canvas[data-pz-mode="pan"] .pz-textlayer span { cursor: grab; }
 .pz-thumb.dragging { opacity: 0.4; }
 /* "Stack another PDF below" tile at the end of the page rail; a label so

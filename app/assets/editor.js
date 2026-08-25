@@ -15,7 +15,9 @@
 //   5. .pz-overlay    — ink strokes; the pointer target for drawing tools
 //
 // Tools: cursor (default; select/move/edit text, click detected text to
-// retype), pan, pen, highlight (translucent multiply), text, image.
+// retype), pan, pen, highlight (translucent multiply), text, image,
+// redact (drag a box; on bake the Rust engine REMOVES the text under it
+// from the content stream — true redaction, not a cover-up).
 
 window.pzEd = {
   lib: null,
@@ -26,7 +28,8 @@ window.pzEd = {
   images: {}, // page -> [{el,id,x,y,w,h,opacity}] live DOM objects, overlay px
   texts: {}, // page -> [{el,x,y,size,color,bold}] top-left overlay px
   rects: {}, // page -> [{x,y,w,h,spanEl}] white-outs, overlay px
-  history: [], // [{type:'stroke'|'image'|'image-del'|'text'|'retype', page, obj?}]
+  redacts: {}, // page -> [{el,x,y,w,h}] pending redaction boxes, overlay px
+  history: [], // [{type:'stroke'|'image'|'image-del'|'text'|'retype'|'redact', page, obj?}]
   redo: [], // popped history entries with payloads
   zoom: 1, // 1 = fit-width; survives re-opens so operations keep your view
   zooming: false,
@@ -68,6 +71,7 @@ async function pzOpenParams(params) {
   E.images = {};
   E.texts = {};
   E.rects = {};
+  E.redacts = {};
   E.history = [];
   E.redo = [];
   E.current = 1;
@@ -407,6 +411,16 @@ async function pzZoom(action) {
         r.w *= ratio;
         r.h *= ratio;
       }
+      for (const rd of E.redacts[n] || []) {
+        rd.x *= ratio;
+        rd.y *= ratio;
+        rd.w *= ratio;
+        rd.h *= ratio;
+        rd.el.style.left = rd.x + "px";
+        rd.el.style.top = rd.y + "px";
+        rd.el.style.width = rd.w + "px";
+        rd.el.style.height = rd.h + "px";
+      }
       for (const t of E.texts[n] || []) {
         t.x *= ratio;
         t.y *= ratio;
@@ -446,10 +460,11 @@ function pzPushHistory(entry) {
   E.redo = [];
 }
 
-// Drawing tools (pen/highlight) — pointer events on the top overlay.
+// Drawing tools (pen/highlight/redact) — pointer events on the top overlay.
 function pzHook(overlay, n) {
   const E = window.pzEd;
   let stroke = null;
+  let redact = null; // {x0, y0} drag anchor while a redact box is drawn
 
   overlay.addEventListener("pointerdown", (ev) => {
     ev.preventDefault();
@@ -462,10 +477,28 @@ function pzHook(overlay, n) {
         opacity: E.tool.opacity,
         points: [[x, y]],
       };
+    } else if (E.tool.mode === "redact") {
+      redact = { x0: x, y0: y };
     }
   });
 
   overlay.addEventListener("pointermove", (ev) => {
+    if (redact) {
+      // Live preview of the box being dragged.
+      const [x, y] = pzPos(overlay, ev);
+      pzRedraw(n);
+      const ctx = E.pages[n].ctx;
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.strokeStyle = "#e11";
+      ctx.setLineDash([4, 3]);
+      const rx = Math.min(redact.x0, x);
+      const ry = Math.min(redact.y0, y);
+      ctx.fillRect(rx, ry, Math.abs(x - redact.x0), Math.abs(y - redact.y0));
+      ctx.strokeRect(rx, ry, Math.abs(x - redact.x0), Math.abs(y - redact.y0));
+      ctx.restore();
+      return;
+    }
     if (!stroke) return;
     const [x, y] = pzPos(overlay, ev);
     const pts = stroke.points;
@@ -485,7 +518,22 @@ function pzHook(overlay, n) {
     ctx.restore();
   });
 
-  const finish = () => {
+  const finish = (ev) => {
+    if (redact) {
+      const [x, y] = pzPos(overlay, ev);
+      const rx = Math.min(redact.x0, x);
+      const ry = Math.min(redact.y0, y);
+      const w = Math.abs(x - redact.x0);
+      const h = Math.abs(y - redact.y0);
+      redact = null;
+      pzRedraw(n);
+      if (w > 4 && h > 4) {
+        const rec = pzMakeRedact(n, rx, ry, w, h);
+        pzPushHistory({ type: "redact", page: n, obj: rec });
+        rec.el.focus();
+      }
+      return;
+    }
     if (!stroke) return;
     (E.strokes[n] = E.strokes[n] || []).push(stroke);
     pzPushHistory({ type: "stroke", page: n });
@@ -495,7 +543,79 @@ function pzHook(overlay, n) {
   overlay.addEventListener("pointerup", finish);
   overlay.addEventListener("pointercancel", () => {
     stroke = null;
+    redact = null;
+    pzRedraw(n);
   });
+}
+
+// ---- redaction boxes ----
+// A pending box is a live object (drag to move, ✕ / Delete to remove).
+// The permanent part happens in Rust at bake time: glyphs under the box
+// are stripped from the content stream, then the area is painted black.
+
+function pzMakeRedact(n, x, y, w, h) {
+  const E = window.pzEd;
+  const p = E.pages[n];
+  const el = document.createElement("div");
+  el.className = "pz-redact";
+  el.tabIndex = 0;
+  el.title = "Redaction — text under this box is removed on export";
+  el.style.left = x + "px";
+  el.style.top = y + "px";
+  el.style.width = w + "px";
+  el.style.height = h + "px";
+  const del = document.createElement("button");
+  del.className = "pz-obj-del";
+  del.textContent = "✕";
+  del.title = "Remove redaction";
+  el.appendChild(del);
+  const rec = { el, x, y, w, h };
+  del.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    pzDeleteRedact(n, rec, true);
+  });
+  el.addEventListener("keydown", (ev) => {
+    if (ev.key === "Delete" || ev.key === "Backspace") {
+      ev.preventDefault();
+      pzDeleteRedact(n, rec, true);
+    }
+  });
+  el.addEventListener("pointerdown", (ev) => pzRedactPointer(ev, n, rec));
+  p.wrap.insertBefore(el, p.overlay);
+  (E.redacts[n] = E.redacts[n] || []).push(rec);
+  return rec;
+}
+
+function pzDeleteRedact(n, rec, history) {
+  const E = window.pzEd;
+  rec.el.remove();
+  const arr = E.redacts[n] || [];
+  const i = arr.indexOf(rec);
+  if (i >= 0) arr.splice(i, 1);
+  if (history) pzPushHistory({ type: "redact-del", page: n, obj: rec });
+}
+
+function pzRedactPointer(ev, n, rec) {
+  if (ev.target.tagName === "BUTTON") return;
+  ev.preventDefault();
+  rec.el.focus();
+  rec.el.setPointerCapture(ev.pointerId);
+  const sx = ev.clientX;
+  const sy = ev.clientY;
+  const ox = rec.x;
+  const oy = rec.y;
+  const mv = (e) => {
+    rec.x = ox + e.clientX - sx;
+    rec.y = oy + e.clientY - sy;
+    rec.el.style.left = rec.x + "px";
+    rec.el.style.top = rec.y + "px";
+  };
+  const up = () => {
+    rec.el.removeEventListener("pointermove", mv);
+    rec.el.removeEventListener("pointerup", up);
+  };
+  rec.el.addEventListener("pointermove", mv);
+  rec.el.addEventListener("pointerup", up);
 }
 
 // Cursor/text tools — clicks that reach the page wrap (the overlay is
@@ -720,7 +840,7 @@ function pzRedraw(n) {
 function pzApplyMode() {
   const E = window.pzEd;
   const mode = E.tool.mode;
-  const drawing = mode === "pen" || mode === "highlight";
+  const drawing = mode === "pen" || mode === "highlight" || mode === "redact";
   for (const p of E.pages) {
     if (p) p.overlay.style.pointerEvents = drawing ? "auto" : "none";
   }
@@ -912,6 +1032,13 @@ function pzUndo() {
     if (i >= 0) arr.splice(i, 1);
     if (last.obj.rect.spanEl) last.obj.rect.spanEl.style.visibility = "";
     E.redo.push(last);
+  } else if (last.type === "redact") {
+    pzDeleteRedact(n, last.obj, false);
+    E.redo.push(last);
+  } else if (last.type === "redact-del") {
+    E.pages[n].wrap.insertBefore(last.obj.el, E.pages[n].overlay);
+    (E.redacts[n] = E.redacts[n] || []).push(last.obj);
+    E.redo.push(last);
   }
   pzRedraw(n);
   return true;
@@ -943,6 +1070,13 @@ function pzRedo() {
     (E.rects[n] = E.rects[n] || []).push(rect);
     E.pages[n].wrap.insertBefore(box.el, E.pages[n].overlay);
     (E.texts[n] = E.texts[n] || []).push(box);
+    E.history.push(last);
+  } else if (last.type === "redact") {
+    E.pages[n].wrap.insertBefore(last.obj.el, E.pages[n].overlay);
+    (E.redacts[n] = E.redacts[n] || []).push(last.obj);
+    E.history.push(last);
+  } else if (last.type === "redact-del") {
+    pzDeleteRedact(n, last.obj, false);
     E.history.push(last);
   }
   pzRedraw(n);
@@ -993,8 +1127,43 @@ function pzExport() {
       ],
       color: [255, 255, 255],
     }));
-    if (strokes.length || images.length || texts.length || rects.length)
-      out.push({ page: n, strokes, images, texts, rects });
+    const redacts = (E.redacts[n] || []).map((r) => ({
+      rect: [
+        r.x / p.scale,
+        p.pdfH - (r.y + r.h) / p.scale,
+        r.w / p.scale,
+        r.h / p.scale,
+      ],
+    }));
+    if (strokes.length || images.length || texts.length || rects.length || redacts.length)
+      out.push({ page: n, strokes, images, texts, rects, redacts });
+  }
+  return out;
+}
+
+// ---- page rasterization (PDF → PNG export) ----
+
+// Render every page of the CURRENT working document to a PNG at `mult`×
+// the page's natural resolution and return them as base64 strings. The
+// caller bakes pending edits first, so what you see is what exports.
+async function pzExportPages(mult) {
+  const E = window.pzEd;
+  const out = [];
+  for (let n = 1; n <= E.doc.numPages; n++) {
+    const page = await E.doc.getPage(n);
+    const vp = page.getViewport({ scale: mult || 2 });
+    const canvas = document.createElement("canvas");
+    canvas.width = vp.width;
+    canvas.height = vp.height;
+    await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp })
+      .promise;
+    const blob = await new Promise((res) => canvas.toBlob(res, "image/png"));
+    const b64 = await new Promise((res) => {
+      const fr = new FileReader();
+      fr.onload = () => res(fr.result.split(",", 2)[1]);
+      fr.readAsDataURL(blob);
+    });
+    out.push(b64);
   }
   return out;
 }

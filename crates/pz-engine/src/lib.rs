@@ -287,6 +287,9 @@ pub struct PageEdit {
     pub images: Vec<EditImage>,
     pub texts: Vec<PlacedText>,
     pub rects: Vec<PlacedRect>,
+    /// True-redaction boxes (PDF points, y = bottom edge): glyphs inside
+    /// are removed from the content stream, then covered black.
+    pub redactions: Vec<(f32, f32, f32, f32)>,
 }
 
 /// The PDF editor's apply step: convert placed images to embeddable JPEGs
@@ -320,6 +323,7 @@ pub fn edit_pdf(
             images,
             texts: edit.texts,
             rects: edit.rects,
+            redactions: edit.redactions,
         });
     }
     pz_pdf::annotate(name, pdf, &converted)

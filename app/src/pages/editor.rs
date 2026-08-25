@@ -90,6 +90,13 @@ struct ExportPage {
     texts: Vec<ExportText>,
     #[serde(default)]
     rects: Vec<ExportRect>,
+    #[serde(default)]
+    redacts: Vec<ExportRedact>,
+}
+
+#[derive(Deserialize)]
+struct ExportRedact {
+    rect: (f32, f32, f32, f32),
 }
 
 #[derive(Deserialize)]
@@ -189,12 +196,14 @@ async fn pending_edits(attachments: &[(String, Vec<u8>)]) -> Result<Vec<PageEdit
                     color: r.color,
                 })
                 .collect(),
+            redactions: p.redacts.into_iter().map(|r| r.rect).collect(),
         })
         .filter(|p| {
             !p.strokes.is_empty()
                 || !p.images.is_empty()
                 || !p.texts.is_empty()
                 || !p.rects.is_empty()
+                || !p.redactions.is_empty()
         })
         .collect())
 }
@@ -217,6 +226,8 @@ enum ExportKind {
     Plain,
     Compressed,
     Protected(String),
+    /// Every page as a 2x PNG (single page → .png, more → .zip).
+    Images,
 }
 
 #[component]
@@ -395,6 +406,40 @@ pub fn EditorPage() -> Element {
                                 },
                             ).await?
                             .remove(0),
+                            ExportKind::Images => {
+                                // Rasterize the BAKED working copy: re-open
+                                // it first so just-drawn edits are included,
+                                // render 2x PNGs in JS, zip them in Rust.
+                                open_in_js(&work).await?;
+                                let v = eval("return pzExportPages(2);")
+                                    .await
+                                    .map_err(|e| format!("could not render pages: {e:?}"))?;
+                                let pages_b64: Vec<String> =
+                                    serde_json::from_value(v).map_err(|e| e.to_string())?;
+                                use base64::engine::general_purpose::STANDARD as B64;
+                                use base64::Engine;
+                                let mut files = Vec::new();
+                                for (i, b64) in pages_b64.iter().enumerate() {
+                                    files.push(InputFile {
+                                        name: format!("{}-page-{:02}.png", stem(&name), i + 1),
+                                        bytes: B64.decode(b64).map_err(|e| e.to_string())?,
+                                    });
+                                }
+                                match files.len() {
+                                    0 => return Err("no pages to export".into()),
+                                    1 => OutputFile {
+                                        name: files[0].name.clone(),
+                                        mime: "image/png",
+                                        bytes: files.remove(0).bytes,
+                                    },
+                                    _ => {
+                                        let mut zip =
+                                            run("zip-files", files, Default::default()).await?.remove(0);
+                                        zip.name = format!("{}-pages.zip", stem(&name));
+                                        zip
+                                    }
+                                }
+                            }
                         };
                         let note = match save_file(&out).map_err(|e| e.to_string())? {
                             Some(path) => format!("Saved to {path}"),
@@ -605,6 +650,18 @@ pub fn EditorPage() -> Element {
                             "🅰"
                         }
                         label { class: "ed-mode", r#for: "img-in", title: "Image — inserts at source size; drag, resize, set opacity", "🖼" }
+                        button {
+                            class: if tool() == "redact" { "ed-mode active" } else { "ed-mode" },
+                            title: "Redact — drag a box; the text inside is permanently REMOVED from the file on export, not just covered",
+                            onclick: move |_| {
+                                set_tool("redact");
+                                notice.set(
+                                    "Drag a box over sensitive text. On export the text under it is permanently removed from the file — not just covered."
+                                        .into(),
+                                );
+                            },
+                            "▓"
+                        }
                     }
                     div { class: "ed-group",
                         button {
@@ -887,6 +944,12 @@ pub fn EditorPage() -> Element {
                                     disabled: busy(),
                                     onclick: move |_| apply_op(Op::Export(ExportKind::Compressed)),
                                     "⬇ Compressed"
+                                }
+                                button {
+                                    class: "ghost",
+                                    disabled: busy(),
+                                    onclick: move |_| apply_op(Op::Export(ExportKind::Images)),
+                                    "⬇ Pages as PNG"
                                 }
                                 input {
                                     r#type: "password",

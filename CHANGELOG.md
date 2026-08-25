@@ -8,6 +8,19 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
 ## [Unreleased]
 
 ### Added
+- PDF editor: true redaction (▓ tool). Drag a box over sensitive text and
+  on bake the glyphs inside are REMOVED from the content stream — copy,
+  search and text extraction find nothing — then the area is painted
+  black. Glyph-precise where the font carries width metrics (surrounding
+  text keeps its exact layout via kerning compensation); fonts we can't
+  measure are redacted conservatively, dropping the whole text run —
+  over-redaction is the acceptable failure mode, under-redaction never
+  is. Pending boxes stay movable/deletable/undoable until baked. (The
+  editor's older white-out retype was never redaction and still isn't —
+  this is the tool for removing content.)
+- PDF editor: "⬇ Pages as PNG" export — every page rendered at 2x and
+  downloaded as a ZIP (single page: a plain .png), with pending edits
+  baked in first. First step toward a standalone PDF→image tool.
 - The engine now runs in a dedicated Web Worker on the web (ADR-0004):
   compressing a huge file no longer freezes the tab — the UI stays
   interactive while the wasm works. Files cross as transferable buffers
