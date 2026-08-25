@@ -49,8 +49,11 @@ crates that compile to both native and wasm32.
   bundle in headless Chromium (works in this container). Run it after
   touching the editor, tool pages, or nav; every owner-reported UI
   regression gets a test in `tests/ui/` so it can't come back. Own CI
-  job. The engine is main-thread wasm: never trigger engine runs from
-  `oninput` on sliders (freezes the page mid-drag) — use `onchange`.
+  job. App code calls the engine through `crate::engine::run` (async —
+  it dispatches to a Web Worker in the built bundle, inline in `dx
+  serve`; ADR-0004), never `pz_engine::run` directly. Still never
+  trigger engine runs from `oninput` on sliders — use `onchange`
+  (inline fallback freezes mid-drag, and worker mode would churn).
 - Secrets: the repo is public. Never hardcode credentials — they go in
   `.env` (gitignored, template `.env.example`). `.githooks/pre-commit`
   (installed via `git config core.hooksPath .githooks`) and the verify

@@ -170,4 +170,14 @@ test.describe("compress image", () => {
     await page.locator("button.primary", { hasText: "Compress Image" }).click();
     await expect(page.locator("section.results")).toBeVisible({ timeout: 30_000 });
   });
+
+  test("engine runs in a Web Worker, not on the main thread (ADR-0004)", async ({ page }) => {
+    await page.setInputFiles("#file-in", pngFiles(1));
+    // The first engine call boots the worker; the preview proves a full
+    // round-trip (transferable request + response) completed.
+    await expect(page.locator(".preview-after")).toBeVisible({ timeout: 15_000 });
+    await expect
+      .poll(async () => page.evaluate(() => window.pzEngineMode), { timeout: 10_000 })
+      .toBe("worker");
+  });
 });

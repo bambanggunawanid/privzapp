@@ -4,6 +4,7 @@
 //! via WebView/WASM on the web. All file processing happens in-process
 //! through `pz-engine`; no bytes ever leave the device.
 
+mod engine;
 mod pages;
 mod save;
 
@@ -33,6 +34,13 @@ pub enum Route {
 }
 
 fn main() {
+    // The engine Web Worker boots this same wasm module a second time
+    // (ADR-0004). In that context there is no Window: register the engine
+    // message handler and skip the UI entirely.
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    if engine::maybe_worker_main() {
+        return;
+    }
     dioxus::launch(App);
 }
 

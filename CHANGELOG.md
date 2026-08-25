@@ -8,6 +8,15 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
 ## [Unreleased]
 
 ### Added
+- The engine now runs in a dedicated Web Worker on the web (ADR-0004):
+  compressing a huge file no longer freezes the tab — the UI stays
+  interactive while the wasm works. Files cross as transferable buffers
+  (no copies beyond the unavoidable one), a crashed worker takes the
+  blame instead of the whole tab and respawns, and browsers or dev
+  setups where the worker can't boot fall back to the old inline path
+  automatically. A Playwright test pins worker mode in the built bundle.
+
+### Added
 - Pre-commit secret guard: `.githooks/pre-commit` + `scripts/check-secrets.py`
   block credentials, key files and `.env` from ever being committed (the
   repo is public); the same scan runs in `verify.sh`/CI. Secrets belong in

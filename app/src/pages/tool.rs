@@ -159,7 +159,7 @@ pub fn ToolPage(slug: String) -> Element {
             percent: percent(),
         };
         spawn(async move {
-            match pz_engine::run(meta.slug, std::slice::from_ref(&f), &opts) {
+            match crate::engine::run(meta.slug, vec![f.clone()], &opts).await {
                 Ok(out) => {
                     if let Some(o) = out.first() {
                         let saved = 100i64
@@ -195,7 +195,7 @@ pub fn ToolPage(slug: String) -> Element {
                         preview_note.set(note);
                     }
                 }
-                Err(e) => preview_note.set(e.to_string()),
+                Err(e) => preview_note.set(e),
             }
         });
     };
@@ -220,10 +220,10 @@ pub fn ToolPage(slug: String) -> Element {
         notice.set(String::new());
         outputs.set(Vec::new());
         spawn(async move {
-            let result = pz_engine::run(meta.slug, &files.read(), &opts);
-            match result {
+            let input = files.read().clone();
+            match crate::engine::run(meta.slug, input, &opts).await {
                 Ok(out) => outputs.set(out),
-                Err(e) => error.set(e.to_string()),
+                Err(e) => error.set(e),
             }
             busy.set(false);
         });

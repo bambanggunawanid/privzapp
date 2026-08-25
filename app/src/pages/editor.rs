@@ -295,8 +295,8 @@ pub fn EditorPage() -> Element {
                         .bytes;
                 }
 
-                let run = |slug: &str, files: Vec<InputFile>, opts: ToolOptions| {
-                    pz_engine::run(slug, &files, &opts).map_err(|e| e.to_string())
+                let run = |slug: &'static str, files: Vec<InputFile>, opts: ToolOptions| async move {
+                    crate::engine::run(slug, files, &opts).await
                 };
                 let doc_file = |bytes: &Vec<u8>| InputFile {
                     name: name.clone(),
@@ -313,7 +313,7 @@ pub fn EditorPage() -> Element {
                                 angle: *angle,
                                 ..Default::default()
                             },
-                        )?;
+                        ).await?;
                         (Some(out[0].bytes.clone()), format!("Rotated {angle}°"))
                     }
                     Op::PageNumbers => {
@@ -321,7 +321,7 @@ pub fn EditorPage() -> Element {
                             "page-numbers-pdf",
                             vec![doc_file(&work)],
                             Default::default(),
-                        )?;
+                        ).await?;
                         (Some(out[0].bytes.clone()), "Page numbers added".into())
                     }
                     Op::Watermark(text) => {
@@ -332,7 +332,7 @@ pub fn EditorPage() -> Element {
                                 text: text.clone(),
                                 ..Default::default()
                             },
-                        )?;
+                        ).await?;
                         (Some(out[0].bytes.clone()), "Watermark stamped".into())
                     }
                     Op::Crop(l, t, r, b) => {
@@ -346,7 +346,7 @@ pub fn EditorPage() -> Element {
                                 height: *b,
                                 ..Default::default()
                             },
-                        )?;
+                        ).await?;
                         (Some(out[0].bytes.clone()), "Margins cropped".into())
                     }
                     Op::Organize(spec) => {
@@ -357,7 +357,7 @@ pub fn EditorPage() -> Element {
                                 pages: spec.clone(),
                                 ..Default::default()
                             },
-                        )?;
+                        ).await?;
                         (Some(out[0].bytes.clone()), "Pages reorganized".into())
                     }
                     Op::Append(other) => {
@@ -371,7 +371,7 @@ pub fn EditorPage() -> Element {
                                 },
                             ],
                             Default::default(),
-                        )?;
+                        ).await?;
                         (Some(out[0].bytes.clone()), "PDF appended".into())
                     }
                     Op::Export(kind) => {
@@ -383,7 +383,7 @@ pub fn EditorPage() -> Element {
                                 bytes: work.clone(),
                             },
                             ExportKind::Compressed => {
-                                run("compress-pdf", vec![doc_file(&work)], Default::default())?
+                                run("compress-pdf", vec![doc_file(&work)], Default::default()).await?
                                     .remove(0)
                             }
                             ExportKind::Protected(pw) => run(
@@ -393,7 +393,7 @@ pub fn EditorPage() -> Element {
                                     password: pw.clone(),
                                     ..Default::default()
                                 },
-                            )?
+                            ).await?
                             .remove(0),
                         };
                         let note = match save_file(&out).map_err(|e| e.to_string())? {

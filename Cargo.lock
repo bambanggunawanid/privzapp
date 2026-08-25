@@ -4088,6 +4088,7 @@ dependencies = [
  "base64",
  "dioxus",
  "dirs",
+ "futures-channel",
  "js-sys",
  "pz-core",
  "pz-engine",

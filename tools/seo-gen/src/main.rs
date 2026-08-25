@@ -145,6 +145,23 @@ fn main() {
     )
     .unwrap();
 
+    // Engine worker shim (ADR-0004): a stable same-origin URL importing
+    // the hashed entry module. Two traps to avoid here:
+    // - it cannot be a blob: URL — the wasm-bindgen glue fetches its
+    //   .wasm by relative path, and blob: is not a valid base;
+    // - the entry must be the one index.html actually references. The
+    //   assets dir accumulates hashed bundles from previous builds, and
+    //   a stale entry boots a stale wasm whose main() predates the
+    //   worker guard — it launches the UI in the worker and aborts.
+    let entry = template
+        .split(r#"src=""#)
+        .skip(1)
+        .filter_map(|s| s.split('"').next())
+        .find(|s| s.contains("assets/privzapp-") && s.ends_with(".js"))
+        .expect("index.html references no privzapp-*.js entry — dx layout changed?")
+        .to_string();
+    fs::write(out.join("pz-worker.js"), format!("import {entry:?};\n")).unwrap();
+
     // llms.txt — plain-markdown site map for AI agents (the llms.txt
     // convention), so agents get the tool list without booting the wasm.
     let mut llms = String::from(
