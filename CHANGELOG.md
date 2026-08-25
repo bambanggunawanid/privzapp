@@ -30,7 +30,9 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
 - CONTRIBUTING.md: from-scratch dev setup (Rust + wasm target,
   dioxus-cli, verify/UI-test scripts) and the ground rules that keep the
   privacy promise intact. The app now links the GitHub repo from the
-  footer and the Support page.
+  footer and the Support page, and the nav carries a "Star on GitHub"
+  button (a plain link on purpose — a live star-count badge would phone
+  home, which the CSP forbids).
 - PDF editor: true redaction (▓ tool). Drag a box over sensitive text and
   on bake the glyphs inside are REMOVED from the content stream — copy,
   search and text extraction find nothing — then the area is painted

@@ -81,6 +81,29 @@ a:hover { text-decoration: underline; }
 }
 .support-cta:hover { background: rgba(255, 179, 193, 0.1); }
 
+/* "Star on GitHub" nav CTA — a plain outbound link on purpose: a live
+   star-count badge would phone home and break the CSP/privacy promise. */
+.gh-star {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted) !important;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 0.9rem;
+}
+.gh-star:hover {
+  color: var(--text) !important;
+  border-color: #e3b341;
+  text-decoration: none;
+}
+.gh-star .gh-star-glyph { color: #e3b341; font-size: 0.85em; }
+@media (max-width: 700px) {
+  .gh-star { padding: 6px 10px; }
+  .gh-star .gh-star-label { display: none; }
+}
+
 /* Quick tool links (wide screens) + the all-tools mega menu. */
 .nav-quick { display: none; }
 @media (min-width: 960px) { .nav-quick { display: inline; } }

@@ -16,6 +16,19 @@ test.describe("home + nav", () => {
     await expect(page.locator(".tool-section")).toHaveCount(4);
   });
 
+  test("nav shows the star-on-GitHub button linking the repo", async ({ page }) => {
+    const star = page.locator(".nav-links .gh-star");
+    await expect(star).toBeVisible();
+    await expect(star).toHaveAttribute(
+      "href",
+      "https://github.com/bambanggunawanid/privzapp",
+    );
+    // Outbound links must not leak an opener or referrer.
+    await expect(star).toHaveAttribute("rel", /noopener/);
+    await expect(star).toHaveAttribute("rel", /noreferrer/);
+    await expect(star).toHaveAttribute("target", "_blank");
+  });
+
   test("all-tools mega menu opens and navigates", async ({ page }) => {
     await page.locator(".nav-alltools").click();
     await expect(page.locator(".megamenu")).toBeVisible();
