@@ -800,6 +800,17 @@ function pzRetype(n, span) {
     color,
     bold,
   });
+  // Source geometry in PDF points (zoom-immune): the engine uses it to
+  // rewrite the run through its ORIGINAL font (family/weight/italics
+  // survive), with the white-out above as live preview + fallback only.
+  rec.pdfSrc = [
+    x / p.scale,
+    p.pdfH - (y + sr.height) / p.scale,
+    sr.width / p.scale,
+    sr.height / p.scale,
+  ];
+  rec.pdfOrig = [x / p.scale, y / p.scale];
+  rect.forRetype = rec;
   pzPushHistory({ type: "retype", page: n, obj: { box: rec, rect } });
   rec.el.focus();
   return true;
@@ -1108,25 +1119,51 @@ function pzExport() {
         im.h / p.scale,
       ],
     }));
-    const texts = (E.texts[n] || [])
-      .filter((t) => t.el.innerText.trim())
-      .map((t) => ({
+    // Boxes born from existing PDF text (retype) go through the
+    // font-preserving edit channel; the engine decides native-vs-fallback,
+    // so their preview white-out is NOT exported (the engine adds its own
+    // cover only when it falls back).
+    const texts = [];
+    const edits = [];
+    for (const t of E.texts[n] || []) {
+      if (!t.el.innerText.trim()) continue;
+      const base = {
         text: t.el.innerText.replace(/\n+$/, ""),
         color: t.color,
         size: t.size / p.scale,
         bold: !!t.bold,
         x: t.x / p.scale,
         y: p.pdfH - (t.y + t.size * 0.85) / p.scale,
+      };
+      if (t.pdfSrc) {
+        edits.push({
+          ...base,
+          src: t.pdfSrc,
+          dx: t.x / p.scale - t.pdfOrig[0],
+          dy: -(t.y / p.scale - t.pdfOrig[1]),
+        });
+      } else {
+        texts.push(base);
+      }
+    }
+    const rects = (E.rects[n] || [])
+      .filter(
+        (r) =>
+          !(
+            r.forRetype &&
+            r.forRetype.el.innerText.trim() &&
+            (E.texts[n] || []).includes(r.forRetype)
+          ),
+      )
+      .map((r) => ({
+        rect: [
+          r.x / p.scale,
+          p.pdfH - (r.y + r.h) / p.scale,
+          r.w / p.scale,
+          r.h / p.scale,
+        ],
+        color: [255, 255, 255],
       }));
-    const rects = (E.rects[n] || []).map((r) => ({
-      rect: [
-        r.x / p.scale,
-        p.pdfH - (r.y + r.h) / p.scale,
-        r.w / p.scale,
-        r.h / p.scale,
-      ],
-      color: [255, 255, 255],
-    }));
     const redacts = (E.redacts[n] || []).map((r) => ({
       rect: [
         r.x / p.scale,
@@ -1135,8 +1172,15 @@ function pzExport() {
         r.h / p.scale,
       ],
     }));
-    if (strokes.length || images.length || texts.length || rects.length || redacts.length)
-      out.push({ page: n, strokes, images, texts, rects, redacts });
+    if (
+      strokes.length ||
+      images.length ||
+      texts.length ||
+      rects.length ||
+      redacts.length ||
+      edits.length
+    )
+      out.push({ page: n, strokes, images, texts, rects, redacts, edits });
   }
   return out;
 }

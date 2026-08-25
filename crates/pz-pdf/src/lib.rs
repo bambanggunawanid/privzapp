@@ -424,11 +424,35 @@ fn add_page_resource(
         Ok(Object::Reference(rid)) => Some(rid),
         Ok(Object::Dictionary(_)) => None,
         _ => {
+            // No direct /Resources: seed the new page-level dict from the
+            // nearest ancestor's — an empty dict here would SHADOW every
+            // inherited font/XObject the content stream still uses. Walk
+            // the Parent chain by hand: lopdf's get_page_resources only
+            // surfaces REFERENCED ancestor dicts, missing inline ones.
+            let mut inherited = Dictionary::new();
+            let mut cur = page_id;
+            for _ in 0..32 {
+                let Ok(dict) = doc.get_dictionary(cur) else {
+                    break;
+                };
+                if let Some(res) = dict
+                    .get(b"Resources")
+                    .ok()
+                    .and_then(|o| resolve_dict(doc, o))
+                {
+                    inherited = res.clone();
+                    break;
+                }
+                match dict.get(b"Parent").and_then(Object::as_reference) {
+                    Ok(parent) => cur = parent,
+                    Err(_) => break,
+                }
+            }
             doc.get_object_mut(page_id)
                 .map_err(broken)?
                 .as_dict_mut()
                 .map_err(broken)?
-                .set("Resources", Dictionary::new());
+                .set("Resources", inherited);
             None
         }
     };
@@ -777,8 +801,17 @@ pub fn protect(
 //
 // Known limitations (documented, not silent): raster IMAGE pixels under
 // the box are covered, not removed (scanned text needs OCR-aware
-// redaction), and annotation appearance streams are untouched — the
-// editor pipeline never produces them, but exotic inputs could.
+// redaction); annotation appearance streams are untouched — the editor
+// pipeline never produces them, but exotic inputs could; pages holding
+// INLINE images (BI..EI) refuse to be rewritten at all (lopdf drops the
+// payload on re-encode — failing loudly beats shipping a corrupt
+// "redacted" file); Type3 fonts are treated as unmeasurable (their
+// Widths are FontMatrix-scaled, not thousandths); and the pen model
+// ignores Ts rise, clipping paths and size-0 Tc displacement — hostile
+// streams can exploit those to move text without moving the model, which
+// the covering box absorbs for redaction but font-preserving TEXT EDITS
+// cannot (they paint no cover; their long list of refusal conditions in
+// `find_text_run` exists exactly for this reason).
 
 /// Affine matrix [a b c d e f]: (x,y) → (a·x + c·y + e, b·x + d·y + f).
 type Mat = [f32; 6];
@@ -909,7 +942,11 @@ fn page_fonts(doc: &Document, page_id: ObjectId) -> BTreeMap<Vec<u8>, FontWidths
 }
 
 fn font_widths(doc: &Document, font: &Dictionary) -> FontWidths {
-    if font.get(b"Subtype").and_then(Object::as_name).ok() == Some(b"Type0") {
+    let subtype = font.get(b"Subtype").and_then(Object::as_name).ok();
+    // Type0: multi-byte codes. Type3: /Widths are FontMatrix-scaled glyph
+    // space, not thousandths, and CharProcs can draw anything — neither
+    // has trustworthy per-byte geometry.
+    if subtype == Some(b"Type0") || subtype == Some(b"Type3") {
         return FontWidths::Opaque;
     }
     let first = font.get(b"FirstChar").and_then(Object::as_i64).ok();
@@ -1178,15 +1215,32 @@ fn show_elems(op: &Operation) -> Vec<ShowElem> {
 }
 
 /// Rewrite a page's content stream with every glyph inside `rects` removed.
+/// `drop_forms` decides what happens to form XObjects whose placed BBox
+/// touches a rect: redaction drops them whole (their shared stream can
+/// hold text), while in-place text EDITS keep them — an edit must never
+/// delete a form the box merely overlaps.
 fn redact_page_text(
     doc: &mut Document,
     page_id: ObjectId,
     rects: &[(f32, f32, f32, f32)],
+    drop_forms: bool,
 ) -> Result<(), PzError> {
     let fonts = page_fonts(doc, page_id);
     let forms = page_form_xobjects(doc, page_id);
     let content = Content::decode(&doc.get_page_content(page_id))
         .map_err(|e| PzError::Failed(format!("could not parse page content for redaction: {e}")))?;
+    // lopdf 0.44 cannot round-trip inline images (BI..EI): the payload is
+    // dropped on re-encode and the bare "BI" desyncs viewers on the rest
+    // of the stream. Failing loudly beats silently shipping a broken
+    // "redacted" file. (Text edits never get here — find_text_run refuses
+    // pages with inline images and falls back to the cover path.)
+    if content.operations.iter().any(|op| op.operator == "BI") {
+        return Err(PzError::Failed(
+            "this page contains an inline image, which PrivZapp cannot safely rewrite yet — \
+             flatten the PDF first (e.g. print it to a new PDF), then redact that copy"
+                .into(),
+        ));
+    }
     let mut st = Redactor::new();
     let mut out: Vec<Operation> = Vec::with_capacity(content.operations.len());
     for op in content.operations {
@@ -1292,6 +1346,7 @@ fn redact_page_text(
                     .and_then(|o| o.as_name().ok())
                     .unwrap_or_default();
                 match forms.get(name) {
+                    _ if !drop_forms => out.push(op),
                     // A form whose placed BBox touches a rect is dropped
                     // whole — its (possibly shared) stream can hold text.
                     Some(Some((fm, bb))) => {
@@ -1326,6 +1381,470 @@ fn redact_page_text(
         .map_err(|e| PzError::Failed(format!("could not rebuild page content: {e}")))?;
     doc.change_page_content(page_id, encoded)
         .map_err(|e| PzError::Failed(format!("could not write redacted content: {e}")))
+}
+
+/// Replace the text of a run that already exists in the PDF. The engine
+/// strips the original glyphs (redaction machinery, form-safe) and
+/// re-emits `text` through the SAME font resource the run under `src`
+/// used — family, weight, italics and scale survive by construction.
+/// When the run can't be re-encoded safely (CID/symbolic fonts, custom
+/// /Differences encodings, non-ASCII replacement text, text living in a
+/// form XObject), it falls back to the editor's classic white-out +
+/// Helvetica so the edit still lands.
+#[derive(Debug, Clone)]
+pub struct TextEdit {
+    /// PDF-points rect (x, y bottom-left, w, h) of the original span.
+    pub src: (f32, f32, f32, f32),
+    /// Replacement text; newlines start extra lines at 1.2× leading.
+    pub text: String,
+    /// How far the editor box moved since creation (PDF points, y up).
+    pub delta: (f32, f32),
+    /// Fallback styling, mirroring `PlacedText` — used only when the
+    /// original font can't be reused.
+    pub size: f32,
+    pub color: (u8, u8, u8),
+    pub pos: (f32, f32),
+    pub bold: bool,
+}
+
+/// Everything needed to re-emit replacement text through the same font
+/// resource the original run used.
+struct RunInfo {
+    font_res: Vec<u8>,
+    tf_size: f32,
+    /// Tm × CTM at the first glyph inside the rect: reproduces the exact
+    /// baseline origin, scale and skew in an identity-CTM context.
+    trm: Mat,
+    tc: f32,
+    tw: f32,
+    th: f32,
+    /// Fill color at the matched op (rg components).
+    color: [f32; 3],
+}
+
+fn is_ascii_encoding(name: &[u8]) -> bool {
+    matches!(
+        name,
+        b"WinAnsiEncoding" | b"MacRomanEncoding" | b"StandardEncoding" | b"PDFDocEncoding"
+    )
+}
+
+/// True when the font's byte codes match ASCII for 32..=126 — the
+/// precondition for re-encoding replacement text through the resource.
+/// Symbolic fonts and /Differences remaps can point any code at any
+/// glyph, so both disqualify.
+fn font_ascii_safe(doc: &Document, font: &Dictionary) -> bool {
+    let base = font
+        .get(b"BaseFont")
+        .and_then(Object::as_name)
+        .unwrap_or(b"");
+    // "ABCDEF+Real-Name" subset tags don't change the encoding story.
+    let base = base.rsplit(|&b| b == b'+').next().unwrap_or(base);
+    if base == b"Symbol" || base == b"ZapfDingbats" {
+        return false;
+    }
+    let symbolic = font
+        .get(b"FontDescriptor")
+        .ok()
+        .and_then(|o| resolve_dict(doc, o))
+        .and_then(|d| d.get(b"Flags").and_then(Object::as_i64).ok())
+        .map(|f| f & 4 != 0)
+        .unwrap_or(false);
+    match font.get(b"Encoding") {
+        Err(_) => !symbolic,
+        Ok(Object::Name(n)) => is_ascii_encoding(n),
+        Ok(obj) => match resolve_dict(doc, obj) {
+            Some(d) => {
+                if d.has(b"Differences") {
+                    return false;
+                }
+                match d.get(b"BaseEncoding").and_then(Object::as_name) {
+                    Ok(n) => is_ascii_encoding(n),
+                    Err(_) => !symbolic,
+                }
+            }
+            // Anything else (a CMap reference, garbage) — not safe.
+            None => false,
+        },
+    }
+}
+
+/// ASCII-safety per font resource name on the page.
+fn page_fonts_ascii_safe(doc: &Document, page_id: ObjectId) -> BTreeMap<Vec<u8>, bool> {
+    let mut out = BTreeMap::new();
+    let Ok((direct, ids)) = doc.get_page_resources(page_id) else {
+        return out;
+    };
+    let mut dicts: Vec<&Dictionary> = direct.into_iter().collect();
+    dicts.extend(ids.iter().filter_map(|id| doc.get_dictionary(*id).ok()));
+    for res in dicts {
+        let Some(fonts) = res.get(b"Font").ok().and_then(|o| resolve_dict(doc, o)) else {
+            continue;
+        };
+        for (name, obj) in fonts.iter() {
+            let Some(font) = resolve_dict(doc, obj) else {
+                continue;
+            };
+            out.entry(name.clone())
+                .or_insert_with(|| font_ascii_safe(doc, font));
+        }
+    }
+    out
+}
+
+/// Every non-newline char must be printable ASCII with a real (positive)
+/// width in the font's table — a zero or missing width means the glyph is
+/// likely absent from the (subset) font and would render blank.
+fn text_covered(text: &str, first: i64, widths: &[f32]) -> bool {
+    text.chars().filter(|&c| c != '\n').all(|c| {
+        (' '..='~').contains(&c)
+            && (c as i64)
+                .checked_sub(first)
+                .and_then(|i| usize::try_from(i).ok())
+                .and_then(|i| widths.get(i).copied())
+                .is_some_and(|w| w > 0.0)
+    })
+}
+
+/// Device-space bbox of the axis-aligned rect (x0, y0, x1, y1) pushed
+/// through `m`.
+fn bbox_of(m: Mat, r: [f32; 4]) -> (f32, f32, f32, f32) {
+    let corners = [(r[0], r[1]), (r[2], r[1]), (r[0], r[3]), (r[2], r[3])];
+    let mut bx = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    for (x, y) in corners {
+        let (dx, dy) = mat_apply(m, x, y);
+        bx = (bx.0.min(dx), bx.1.min(dy), bx.2.max(dx), bx.3.max(dy));
+    }
+    bx
+}
+
+/// Walk the page content looking for the text run under `te.src` and
+/// return what's needed to re-emit through its font — or None when the
+/// caller must fall back to white-out + Helvetica. Besides needing an
+/// eligible run (measurable, upright, ASCII-safe, coverage-complete,
+/// normally-rendered with a known fill color, finite state), the page
+/// itself can disqualify the native path: inline images (lopdf cannot
+/// round-trip BI..EI — any rewrite corrupts the stream) and image/form
+/// XObjects overlapping the rect (their raster pixels or glyphs would
+/// keep showing the OLD content next to the replacement; the fallback's
+/// white-out covers them instead).
+///
+/// Pen tracking mirrors `Redactor::show()` exactly — the strip that
+/// follows uses the same math, and a divergence here would remove
+/// different glyphs than were matched. Keep the two in lockstep.
+fn find_text_run(doc: &Document, page_id: ObjectId, te: &TextEdit) -> Option<RunInfo> {
+    let fonts = page_fonts(doc, page_id);
+    let safe = page_fonts_ascii_safe(doc, page_id);
+    let forms = page_form_xobjects(doc, page_id);
+    let content = Content::decode(&doc.get_page_content(page_id)).ok()?;
+    let rects = [te.src];
+    let mut st = Redactor::new();
+    // Fill color and text render mode are graphics state: saved/restored
+    // by q/Q like the CTM. Fill goes to None (unknown) through color
+    // spaces we don't model — capturing then could repaint the
+    // replacement in the wrong (even invisible) color.
+    let mut fill: Option<[f32; 3]> = Some([0.0; 3]);
+    let mut tr = 0.0f32;
+    let mut gs_stack: Vec<(Option<[f32; 3]>, f32)> = Vec::new();
+    // The capture is DEFERRED to the end of the walk: a disqualifier
+    // (inline image, overlapping XObject) later in the stream must void
+    // a match made earlier.
+    let mut found: Option<RunInfo> = None;
+    for op in &content.operations {
+        match op.operator.as_str() {
+            "q" => {
+                st.stack.push(st.ctm);
+                gs_stack.push((fill, tr));
+            }
+            "Q" => {
+                st.ctm = st.stack.pop().unwrap_or(MAT_ID);
+                // On underflow (hostile unbalanced Q) keep the CURRENT
+                // fill/Tr rather than resetting to defaults — resetting
+                // would flip a still-active "3 Tr" back to visible. The
+                // CTM reset above stays as-is: it is lockstep-shared with
+                // the strip and must not diverge.
+                if let Some(saved) = gs_stack.pop() {
+                    (fill, tr) = saved;
+                }
+            }
+            "cm" => {
+                let m: Mat = std::array::from_fn(|i| Redactor::num(op, i));
+                st.ctm = mat_mul(m, st.ctm);
+            }
+            "BT" => {
+                st.tm = MAT_ID;
+                st.tlm = MAT_ID;
+            }
+            "Tf" => {
+                st.font = op
+                    .operands
+                    .first()
+                    .and_then(|o| o.as_name().ok())
+                    .unwrap_or_default()
+                    .to_vec();
+                st.size = Redactor::num(op, 1);
+            }
+            "TL" => st.leading = Redactor::num(op, 0),
+            "Tc" => st.tc = Redactor::num(op, 0),
+            "Tw" => st.tw = Redactor::num(op, 0),
+            "Tz" => st.th = Redactor::num(op, 0) / 100.0,
+            "Td" => st.next_line(Redactor::num(op, 0), Redactor::num(op, 1)),
+            "TD" => {
+                st.leading = -Redactor::num(op, 1);
+                st.next_line(Redactor::num(op, 0), Redactor::num(op, 1));
+            }
+            "Tm" => {
+                let m: Mat = std::array::from_fn(|i| Redactor::num(op, i));
+                st.tm = m;
+                st.tlm = m;
+            }
+            "T*" => {
+                let l = st.leading;
+                st.next_line(0.0, -l);
+            }
+            // An operand-less/garbage Tr keeps the PREVIOUS mode (what a
+            // viewer skipping the malformed op does) — defaulting to 0
+            // would let "3 Tr Tr" spoof the visibility check. Find-only
+            // state: no lockstep constraint with the strip.
+            "Tr" => {
+                tr = op
+                    .operands
+                    .first()
+                    .and_then(|o| o.as_float().ok())
+                    .unwrap_or(tr)
+            }
+            "rg" => fill = Some(std::array::from_fn(|i| Redactor::num(op, i))),
+            "g" => {
+                let v = Redactor::num(op, 0);
+                fill = Some([v, v, v]);
+            }
+            "k" => {
+                let (c, m, y, k) = (
+                    Redactor::num(op, 0),
+                    Redactor::num(op, 1),
+                    Redactor::num(op, 2),
+                    Redactor::num(op, 3),
+                );
+                fill = Some([
+                    (1.0 - c) * (1.0 - k),
+                    (1.0 - m) * (1.0 - k),
+                    (1.0 - y) * (1.0 - k),
+                ]);
+            }
+            // Color through a selected color space (Separation, Lab, ICC,
+            // patterns…): component semantics are space-dependent — a 1.0
+            // Separation tint is DARK ink, not light gray. Unknown fill
+            // disqualifies capture; the fallback handles the edit safely.
+            "cs" | "sc" | "scn" => fill = None,
+            // lopdf 0.44 cannot round-trip inline images: BI..EI decodes
+            // to a bare operand-less "BI" op, so re-encoding drops the
+            // image payload and desyncs viewers on the rest of the
+            // stream. Never rewrite such a page.
+            "BI" => return None,
+            "Do" => {
+                let name = op
+                    .operands
+                    .first()
+                    .and_then(|o| o.as_name().ok())
+                    .unwrap_or_default();
+                let placed = match forms.get(name) {
+                    Some(Some((fm, bb))) => {
+                        bbox_of(mat_mul(*fm, st.ctm), [bb[0], bb[1], bb[2], bb[3]])
+                    }
+                    // A form whose extent is unknowable could overlap
+                    // anything — refuse the native path outright.
+                    Some(None) => return None,
+                    // Image (or unknown) XObject: drawn into the CTM's
+                    // unit square.
+                    None => bbox_of(st.ctm, [0.0, 0.0, 1.0, 1.0]),
+                };
+                if rects_hit(&rects, placed) {
+                    return None;
+                }
+            }
+            "Tj" | "TJ" | "'" | "\"" => {
+                if op.operator == "'" {
+                    let l = st.leading;
+                    st.next_line(0.0, -l);
+                }
+                if op.operator == "\"" {
+                    st.tw = Redactor::num(op, 0);
+                    st.tc = Redactor::num(op, 1);
+                    let l = st.leading;
+                    st.next_line(0.0, -l);
+                }
+                let elems = show_elems(op);
+                let (size, tc, tw, th) = (st.size, st.tc, st.tw, st.th);
+                if size == 0.0 || th == 0.0 {
+                    // show() advances only kerns in this degenerate state.
+                    for e in &elems {
+                        if let ShowElem::Kern(n) = e {
+                            st.advance(-n / 1000.0 * size * th);
+                        }
+                    }
+                    continue;
+                }
+                match fonts.get(&st.font) {
+                    Some(FontWidths::Simple {
+                        first,
+                        widths,
+                        missing,
+                    }) if size > 0.0 && th > 0.0 => {
+                        // Only a normally-rendered (Tr 0 — not invisible
+                        // OCR text, not clipping) run with a known fill
+                        // can host the replacement.
+                        let usable = tr == 0.0
+                            && fill.is_some()
+                            && safe.get(&st.font).copied().unwrap_or(false)
+                            && text_covered(&te.text, *first, widths);
+                        for e in elems {
+                            match e {
+                                ShowElem::Kern(n) => st.advance(-n / 1000.0 * size * th),
+                                ShowElem::Str(bytes) => {
+                                    for code in bytes {
+                                        let w0 = (code as i64)
+                                            .checked_sub(*first)
+                                            .and_then(|idx| usize::try_from(idx).ok())
+                                            .and_then(|i| widths.get(i).copied())
+                                            .unwrap_or(*missing);
+                                        let adv = (w0 / 1000.0 * size
+                                            + tc
+                                            + if code == 32 { tw } else { 0.0 })
+                                            * th;
+                                        if usable
+                                            && found.is_none()
+                                            && rects_hit(&rects, st.run_bbox(adv))
+                                        {
+                                            let trm = mat_mul(st.tm, st.ctm);
+                                            // Hostile operands can drive
+                                            // the state — the fill too,
+                                            // via the k conversion's
+                                            // multiplies — to ±inf;
+                                            // emitting that writes
+                                            // invalid PDF numbers. Skip
+                                            // the capture, never the
+                                            // walk. Finite fills clamp
+                                            // into rg's [0,1] domain.
+                                            let color = fill
+                                                .filter(|f| f.iter().all(|v| v.is_finite()))
+                                                .map(|f| f.map(|v| v.clamp(0.0, 1.0)));
+                                            if let Some(color) = color {
+                                                if trm.iter().all(|v| v.is_finite())
+                                                    && [size, tc, tw, th]
+                                                        .iter()
+                                                        .all(|v| v.is_finite())
+                                                {
+                                                    found = Some(RunInfo {
+                                                        font_res: st.font.clone(),
+                                                        tf_size: size,
+                                                        trm,
+                                                        tc,
+                                                        tw,
+                                                        th,
+                                                        color,
+                                                    });
+                                                }
+                                            }
+                                        }
+                                        st.advance(adv);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Opaque or mirrored run: never a native-edit target;
+                    // track the pen with show()'s 0.6-em estimate.
+                    _ => {
+                        let mut signed = 0.0f32;
+                        for e in &elems {
+                            match e {
+                                ShowElem::Str(bytes) => {
+                                    for &code in bytes {
+                                        signed += (600.0 / 1000.0 * size
+                                            + tc
+                                            + if code == 32 { tw } else { 0.0 })
+                                            * th;
+                                    }
+                                }
+                                ShowElem::Kern(n) => signed += -n / 1000.0 * size * th,
+                            }
+                        }
+                        st.advance(signed);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    found
+}
+
+/// Append the ops that draw `te.text` through the matched run's own font
+/// resource, at its exact baseline (plus any drag delta), scale and skew.
+fn emit_native_text(ops: &mut Vec<Operation>, run: &RunInfo, te: &TextEdit) {
+    if te.text.trim().is_empty() {
+        return; // strip-only: the edit deleted the text
+    }
+    let mut m = run.trm;
+    // The effective on-page size is Tf size × the matrix's vertical
+    // scale; only rescale when the user actually changed the box size
+    // (an 8% dead zone absorbs CSS rounding).
+    let eff = run.tf_size * run.trm[2].hypot(run.trm[3]);
+    if eff.is_finite() && eff > f32::EPSILON {
+        let ratio = te.size / eff;
+        if (ratio - 1.0).abs() > 0.08 {
+            for v in &mut m[..4] {
+                *v *= ratio;
+            }
+        }
+    }
+    m[4] += te.delta.0;
+    m[5] += te.delta.1;
+    ops.push(Operation::new("q", vec![]));
+    ops.push(Operation::new("BT", vec![]));
+    ops.push(Operation::new(
+        "Tf",
+        vec![Object::Name(run.font_res.clone()), run.tf_size.into()],
+    ));
+    // Always pin the full text state: hostile content with unbalanced q
+    // could leak its own Tz/Tc/Tw past the stamp wrapper otherwise.
+    ops.push(Operation::new("Tz", vec![(run.th * 100.0).into()]));
+    ops.push(Operation::new("Tc", vec![run.tc.into()]));
+    ops.push(Operation::new("Tw", vec![run.tw.into()]));
+    ops.push(Operation::new("TL", vec![(run.tf_size * 1.2).into()]));
+    ops.push(Operation::new(
+        "rg",
+        vec![
+            run.color[0].into(),
+            run.color[1].into(),
+            run.color[2].into(),
+        ],
+    ));
+    ops.push(Operation::new(
+        "Tm",
+        vec![
+            m[0].into(),
+            m[1].into(),
+            m[2].into(),
+            m[3].into(),
+            m[4].into(),
+            m[5].into(),
+        ],
+    ));
+    for (i, line) in te.text.lines().enumerate() {
+        if i > 0 {
+            ops.push(Operation::new("T*", vec![]));
+        }
+        ops.push(Operation::new(
+            "Tj",
+            vec![Object::String(
+                line.as_bytes().to_vec(),
+                lopdf::StringFormat::Literal,
+            )],
+        ));
+    }
+    ops.push(Operation::new("ET", vec![]));
+    ops.push(Operation::new("Q", vec![]));
 }
 
 /// A freehand ink stroke (signature / handwriting) in PDF coordinates
@@ -1385,6 +1904,8 @@ pub struct PageEdits {
     /// True-redaction boxes in PDF points (x, y bottom-left, w, h): text
     /// inside is REMOVED from the content stream, then covered black.
     pub redactions: Vec<(f32, f32, f32, f32)>,
+    /// In-place edits of text already in the PDF (font-preserving).
+    pub text_edits: Vec<TextEdit>,
 }
 
 /// Bake editor annotations (ink strokes and placed images) into the PDF.
@@ -1413,6 +1934,7 @@ pub fn annotate(name: &str, bytes: &[u8], edits: &[PageEdits]) -> Result<OutputF
             && edit.texts.is_empty()
             && edit.rects.is_empty()
             && edit.redactions.is_empty()
+            && edit.text_edits.is_empty()
         {
             continue;
         }
@@ -1424,10 +1946,44 @@ pub fn annotate(name: &str, bytes: &[u8], edits: &[PageEdits]) -> Result<OutputF
         };
         applied = true;
 
+        // In-place text edits: rewrite the matched run through its own
+        // font resource so family/weight/italics survive, falling back
+        // to white-out + Helvetica when the run can't be re-encoded.
+        // All decisions (immutable walks) happen before any strip
+        // mutates the content stream.
+        let mut rects_all = edit.rects.clone();
+        let mut texts_all = edit.texts.clone();
+        let mut native_ops: Vec<Operation> = Vec::new();
+        let mut native_strips: Vec<(f32, f32, f32, f32)> = Vec::new();
+        for te in &edit.text_edits {
+            if let Some(run) = find_text_run(&doc, page_id, te) {
+                native_strips.push(te.src);
+                emit_native_text(&mut native_ops, &run, te);
+            } else {
+                let (x, y, w, h) = te.src;
+                rects_all.push(PlacedRect {
+                    rect: (x - 2.0, y - 2.0, w + 4.0, h + 4.0),
+                    color: (255, 255, 255),
+                });
+                texts_all.push(PlacedText {
+                    text: te.text.clone(),
+                    size: te.size,
+                    color: te.color,
+                    pos: te.pos,
+                    bold: te.bold,
+                });
+            }
+        }
+        // drop_forms = false: an EDIT must never delete a (possibly
+        // shared) form XObject its box merely touches.
+        if !native_strips.is_empty() {
+            redact_page_text(&mut doc, page_id, &native_strips, false)?;
+        }
+
         // True redaction first: strip the glyphs from the content stream,
         // then the black boxes below cover whatever else was in the area.
         if !edit.redactions.is_empty() {
-            redact_page_text(&mut doc, page_id, &edit.redactions)?;
+            redact_page_text(&mut doc, page_id, &edit.redactions, true)?;
         }
 
         // One ExtGState per distinct sub-1 opacity on this page: strokes
@@ -1472,7 +2028,7 @@ pub fn annotate(name: &str, bytes: &[u8], edits: &[PageEdits]) -> Result<OutputF
                 color: (0, 0, 0),
             })
             .collect();
-        for rect in edit.rects.iter().chain(black_boxes.iter()) {
+        for rect in rects_all.iter().chain(black_boxes.iter()) {
             let (r, g, b) = rect.color;
             let (x, y, w, h) = rect.rect;
             ops.push(Operation::new("q", vec![]));
@@ -1526,13 +2082,16 @@ pub fn annotate(name: &str, bytes: &[u8], edits: &[PageEdits]) -> Result<OutputF
             ));
             ops.push(Operation::new("Q", vec![]));
         }
-        if edit.texts.iter().any(|t| !t.bold) {
+        // Font-preserving replacements render at the same layer as typed
+        // text (above white-outs, below ink).
+        ops.append(&mut native_ops);
+        if texts_all.iter().any(|t| !t.bold) {
             add_page_resource(&mut doc, page_id, "Font", "PZtx", font_id)?;
         }
-        if edit.texts.iter().any(|t| t.bold) {
+        if texts_all.iter().any(|t| t.bold) {
             add_page_resource(&mut doc, page_id, "Font", "PZtxb", bold_font_id)?;
         }
-        for txt in &edit.texts {
+        for txt in &texts_all {
             if txt.text.trim().is_empty() {
                 continue;
             }
@@ -1980,6 +2539,646 @@ mod tests {
         assert!(content.operations.iter().any(|op| op.operator == "Do"));
     }
 
+    /// Like `measured_pdf` but with an ITALIC base font and a blue fill —
+    /// the fixture for font-preserving text edits. Text at (100, 600),
+    /// size 24, every glyph 500/1000 (12 pt) wide.
+    fn styled_pdf(text: &str) -> Vec<u8> {
+        let mut doc = Document::with_version("1.5");
+        let pages_id = doc.new_object_id();
+        let widths: Vec<Object> = (0..95).map(|_| 500.into()).collect();
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Times-Italic",
+            "FirstChar" => 32,
+            "LastChar" => 126,
+            "Widths" => widths,
+        });
+        let resources_id = doc.add_object(dictionary! {
+            "Font" => dictionary! { "F1" => font_id },
+        });
+        let content = Content {
+            operations: vec![
+                Operation::new("BT", vec![]),
+                Operation::new("Tf", vec!["F1".into(), 24.into()]),
+                Operation::new("rg", vec![0.into(), 0.into(), 1.into()]),
+                Operation::new("Td", vec![100.into(), 600.into()]),
+                Operation::new("Tj", vec![Object::string_literal(text)]),
+                Operation::new("ET", vec![]),
+            ],
+        };
+        let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => content_id,
+            "Resources" => resources_id,
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![page_id.into()],
+                "Count" => 1,
+            }),
+        );
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        doc.trailer.set("Root", catalog_id);
+        let mut buf = Vec::new();
+        doc.save_to(&mut buf).unwrap();
+        buf
+    }
+
+    fn edit_over_fixture_text(text: &str) -> TextEdit {
+        TextEdit {
+            src: (98.0, 590.0, 180.0, 40.0),
+            text: text.into(),
+            delta: (0.0, 0.0),
+            size: 24.0,
+            color: (20, 20, 20),
+            pos: (100.0, 600.0),
+            bold: false,
+        }
+    }
+
+    fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack.windows(needle.len()).any(|w| w == needle)
+    }
+
+    #[test]
+    fn text_edit_reuses_the_original_font() {
+        // The replacement must go through /F1 (Times-Italic) at the
+        // original baseline and color — NOT the Helvetica fallback.
+        let out = annotate(
+            "doc.pdf",
+            &styled_pdf("Original words"),
+            &[PageEdits {
+                page: 1,
+                text_edits: vec![edit_over_fixture_text("Changed line")],
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        let s = String::from_utf8(extract_text("doc.pdf", &out.bytes).unwrap().bytes).unwrap();
+        assert!(s.contains("Changed line"), "replacement missing: {s}");
+        assert!(!s.contains("Original"), "old text still extractable: {s}");
+        assert!(
+            !contains_bytes(&out.bytes, b"PZtx"),
+            "Helvetica fallback used for an editable run"
+        );
+        let doc = Document::load_mem(&out.bytes).unwrap();
+        let page = *doc.get_pages().get(&1).unwrap();
+        let content = Content::decode(&doc.get_page_content(page)).unwrap();
+        // Exact original placement: Tm translation (100, 600), unscaled.
+        assert!(
+            content.operations.iter().any(|op| op.operator == "Tm"
+                && (Redactor::num(op, 4) - 100.0).abs() < 0.01
+                && (Redactor::num(op, 5) - 600.0).abs() < 0.01
+                && (Redactor::num(op, 0) - 1.0).abs() < 0.01),
+            "replacement not at the original baseline"
+        );
+        // Fill color captured from the run (blue), not the UI sample: the
+        // fixture's rg plus the re-emitted one.
+        let blue_fills = content
+            .operations
+            .iter()
+            .filter(|op| {
+                op.operator == "rg"
+                    && Redactor::num(op, 0) == 0.0
+                    && Redactor::num(op, 1) == 0.0
+                    && (Redactor::num(op, 2) - 1.0).abs() < 0.01
+            })
+            .count();
+        assert_eq!(blue_fills, 2, "run's fill color not preserved");
+    }
+
+    #[test]
+    fn text_edit_applies_the_drag_delta() {
+        let mut te = edit_over_fixture_text("Moved");
+        te.delta = (10.0, -5.0);
+        let out = annotate(
+            "doc.pdf",
+            &styled_pdf("Original words"),
+            &[PageEdits {
+                page: 1,
+                text_edits: vec![te],
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        let doc = Document::load_mem(&out.bytes).unwrap();
+        let page = *doc.get_pages().get(&1).unwrap();
+        let content = Content::decode(&doc.get_page_content(page)).unwrap();
+        assert!(
+            content.operations.iter().any(|op| op.operator == "Tm"
+                && (Redactor::num(op, 4) - 110.0).abs() < 0.01
+                && (Redactor::num(op, 5) - 595.0).abs() < 0.01),
+            "drag delta not applied to the baseline"
+        );
+    }
+
+    #[test]
+    fn text_edit_falls_back_without_widths() {
+        // The plain fixture's font has no Widths: the run can't be
+        // measured, so the edit lands as white-out + Helvetica and the
+        // original glyphs stay (covered, not stripped).
+        let out = annotate(
+            "doc.pdf",
+            &sample_pdf(1),
+            &[PageEdits {
+                page: 1,
+                text_edits: vec![edit_over_fixture_text("New text")],
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        let s = String::from_utf8(extract_text("doc.pdf", &out.bytes).unwrap().bytes).unwrap();
+        assert!(s.contains("New text"), "fallback text missing: {s}");
+        assert!(s.contains("Page 1"), "fallback must not strip: {s}");
+        assert!(
+            contains_bytes(&out.bytes, b"PZtx"),
+            "fallback font resource missing"
+        );
+    }
+
+    #[test]
+    fn text_edit_falls_back_on_non_ascii_text() {
+        let out = annotate(
+            "doc.pdf",
+            &styled_pdf("Original words"),
+            &[PageEdits {
+                page: 1,
+                text_edits: vec![edit_over_fixture_text("R\u{e9}sum\u{e9}")],
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        assert!(
+            contains_bytes(&out.bytes, b"PZtx"),
+            "non-ASCII text must take the Helvetica (WinAnsi) fallback"
+        );
+    }
+
+    #[test]
+    fn text_edit_falls_back_on_differences_encoding() {
+        // A /Differences remap can point any code at any glyph — byte
+        // codes stop being ASCII, so the native path must refuse.
+        let mut doc = Document::load_mem(&styled_pdf("Original words")).unwrap();
+        let font_id = *doc
+            .objects
+            .iter()
+            .find(|(_, o)| {
+                o.as_dict()
+                    .is_ok_and(|d| d.get(b"Type").and_then(Object::as_name).ok() == Some(b"Font"))
+            })
+            .map(|(id, _)| id)
+            .unwrap();
+        if let Ok(d) = doc.get_dictionary_mut(font_id) {
+            d.set(
+                "Encoding",
+                dictionary! {
+                    "Type" => "Encoding",
+                    "Differences" => vec![65.into(), Object::Name(b"heart".to_vec())],
+                },
+            );
+        }
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        let out = annotate(
+            "doc.pdf",
+            &bytes,
+            &[PageEdits {
+                page: 1,
+                text_edits: vec![edit_over_fixture_text("Changed line")],
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        assert!(
+            contains_bytes(&out.bytes, b"PZtx"),
+            "remapped encoding must take the fallback"
+        );
+    }
+
+    /// Load `styled_pdf`, replace page 1's content with raw bytes, save.
+    fn styled_with_content(content: &[u8]) -> Vec<u8> {
+        let mut doc = Document::load_mem(&styled_pdf("x")).unwrap();
+        let page_id = *doc.get_pages().get(&1).unwrap();
+        doc.change_page_content(page_id, content.to_vec()).unwrap();
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        bytes
+    }
+
+    #[test]
+    fn text_edit_falls_back_on_type3_fonts() {
+        // Type3 /Widths are FontMatrix-scaled and CharProcs draw arbitrary
+        // shapes — never re-encode replacement text through one.
+        let mut doc = Document::load_mem(&styled_pdf("Original words")).unwrap();
+        let font_id = *doc
+            .objects
+            .iter()
+            .find(|(_, o)| {
+                o.as_dict()
+                    .is_ok_and(|d| d.get(b"Type").and_then(Object::as_name).ok() == Some(b"Font"))
+            })
+            .map(|(id, _)| id)
+            .unwrap();
+        if let Ok(d) = doc.get_dictionary_mut(font_id) {
+            d.set("Subtype", Object::Name(b"Type3".to_vec()));
+        }
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        let out = annotate(
+            "doc.pdf",
+            &bytes,
+            &[PageEdits {
+                page: 1,
+                text_edits: vec![edit_over_fixture_text("Changed line")],
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        assert!(
+            contains_bytes(&out.bytes, b"PZtx"),
+            "Type3 font must take the fallback"
+        );
+    }
+
+    #[test]
+    fn text_edit_refuses_invisible_ocr_text() {
+        // Render mode 3 = invisible (scanned pages with an OCR layer).
+        // Editing it natively would strip only the hidden text while the
+        // raster of the old word stays visible — the fallback's white-out
+        // is the correct treatment, and the original run stays put.
+        let src = styled_with_content(b"BT /F1 24 Tf 3 Tr 100 600 Td (Original words) Tj ET");
+        let out = annotate(
+            "doc.pdf",
+            &src,
+            &[PageEdits {
+                page: 1,
+                text_edits: vec![edit_over_fixture_text("Changed line")],
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        assert!(
+            contains_bytes(&out.bytes, b"PZtx"),
+            "invisible text must take the fallback"
+        );
+        let s = String::from_utf8(extract_text("doc.pdf", &out.bytes).unwrap().bytes).unwrap();
+        assert!(s.contains("Original"), "fallback must not strip: {s}");
+    }
+
+    #[test]
+    fn text_edit_refuses_overlapping_images() {
+        // An image XObject drawn over the rect can carry the old content
+        // as pixels; the native path (which paints no cover) must refuse.
+        // Placement is all that matters for the refusal, so the fixture
+        // doesn't bother embedding real image bytes.
+        let over = styled_with_content(
+            b"q 180 0 0 40 95 585 cm /Im1 Do Q\nBT /F1 24 Tf 100 600 Td (Original words) Tj ET",
+        );
+        let out = annotate(
+            "doc.pdf",
+            &over,
+            &[PageEdits {
+                page: 1,
+                text_edits: vec![edit_over_fixture_text("Changed line")],
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        assert!(
+            contains_bytes(&out.bytes, b"PZtx"),
+            "image over the rect must take the fallback"
+        );
+        // The same image placed elsewhere leaves the native path alone.
+        let away = styled_with_content(
+            b"q 50 0 0 50 400 100 cm /Im1 Do Q\nBT /F1 24 Tf 100 600 Td (Original words) Tj ET",
+        );
+        let out = annotate(
+            "doc.pdf",
+            &away,
+            &[PageEdits {
+                page: 1,
+                text_edits: vec![edit_over_fixture_text("Changed line")],
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        assert!(
+            !contains_bytes(&out.bytes, b"PZtx"),
+            "distant image must not disable the native path"
+        );
+    }
+
+    #[test]
+    fn text_edit_refuses_inline_image_pages() {
+        // lopdf drops BI..EI payloads on re-encode; rewriting such a
+        // stream corrupts the page. The edit must fall back (no rewrite).
+        let src = styled_with_content(
+            b"BI /W 2 /H 2 /CS /G /BPC 8 ID \xff\x00\x01\x02 EI\nBT /F1 24 Tf 100 600 Td (Original words) Tj ET",
+        );
+        let out = annotate(
+            "doc.pdf",
+            &src,
+            &[PageEdits {
+                page: 1,
+                text_edits: vec![edit_over_fixture_text("Changed line")],
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        assert!(
+            contains_bytes(&out.bytes, b"PZtx"),
+            "inline-image page must take the fallback"
+        );
+        // The (possibly re-deflated) content stream still carries the
+        // untouched inline image and the original text.
+        let doc = Document::load_mem(&out.bytes).unwrap();
+        let page = *doc.get_pages().get(&1).unwrap();
+        let content = doc.get_page_content(page);
+        assert!(
+            contains_bytes(&content, b"EI"),
+            "fallback must leave the original stream untouched"
+        );
+        assert!(
+            contains_bytes(&content, b"(Original words)"),
+            "fallback must not strip text on inline-image pages"
+        );
+    }
+
+    #[test]
+    fn redaction_errors_on_inline_images() {
+        // Redaction has no fallback: rewriting would corrupt the page, so
+        // it must fail loudly rather than ship a broken "redacted" file.
+        let src = styled_with_content(
+            b"BI /W 2 /H 2 /CS /G /BPC 8 ID \xff\x00\x01\x02 EI\nBT /F1 24 Tf 100 600 Td (SECRET) Tj ET",
+        );
+        let err = annotate(
+            "doc.pdf",
+            &src,
+            &[PageEdits {
+                page: 1,
+                redactions: vec![(98.0, 590.0, 80.0, 40.0)],
+                ..Default::default()
+            }],
+        );
+        assert!(err.is_err(), "inline-image page must refuse redaction");
+    }
+
+    #[test]
+    fn text_edit_falls_back_on_unknown_fill() {
+        // A Separation tint of 1.0 is DARK ink — modeling it as gray 1.0
+        // would repaint the replacement in white. Unknown color spaces
+        // disqualify the native path.
+        let src =
+            styled_with_content(b"/Sep cs 1 scn BT /F1 24 Tf 100 600 Td (Original words) Tj ET");
+        let out = annotate(
+            "doc.pdf",
+            &src,
+            &[PageEdits {
+                page: 1,
+                text_edits: vec![edit_over_fixture_text("Changed line")],
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        assert!(
+            contains_bytes(&out.bytes, b"PZtx"),
+            "unmodeled color space must take the fallback"
+        );
+    }
+
+    #[test]
+    fn text_edit_refuses_nonfinite_state() {
+        // A Tm coefficient that saturates f32 to +inf would be written
+        // back as a literal "inf" (invalid PDF number) if captured.
+        let mut content = b"BT /F1 24 Tf 1".to_vec();
+        content.extend(std::iter::repeat_n(b'0', 41));
+        content.extend_from_slice(b" 0 0 1 100 600 Tm (Original words) Tj ET");
+        let out = annotate(
+            "doc.pdf",
+            &styled_with_content(&content),
+            &[PageEdits {
+                page: 1,
+                text_edits: vec![edit_over_fixture_text("Changed line")],
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        assert!(
+            contains_bytes(&out.bytes, b"PZtx"),
+            "non-finite text state must take the fallback"
+        );
+        assert!(
+            !contains_bytes(&out.bytes, b" inf"),
+            "no non-finite operand may reach the output"
+        );
+    }
+
+    #[test]
+    fn text_edit_refuses_nonfinite_fill() {
+        // FINITE k operands whose CMYK→RGB conversion multiplies into
+        // ±inf must not reach the emitted rg as a literal "inf" token.
+        let big = "-3".to_string() + &"0".repeat(38);
+        let content = format!("{big} 0 0 {big} k BT /F1 24 Tf 100 600 Td (Original words) Tj ET");
+        let out = annotate(
+            "doc.pdf",
+            &styled_with_content(content.as_bytes()),
+            &[PageEdits {
+                page: 1,
+                text_edits: vec![edit_over_fixture_text("Changed line")],
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        assert!(
+            contains_bytes(&out.bytes, b"PZtx"),
+            "non-finite fill must take the fallback"
+        );
+        assert!(
+            !contains_bytes(&out.bytes, b" inf"),
+            "no non-finite operand may reach the output"
+        );
+    }
+
+    #[test]
+    fn text_edit_ignores_malformed_tr_spoof() {
+        // "3 Tr Tr": a viewer skips the operand-less second Tr and keeps
+        // invisible mode; treating it as "0 Tr" would spoof the
+        // visibility check into the native path.
+        let src = styled_with_content(b"BT /F1 24 Tf 3 Tr Tr 100 600 Td (Original words) Tj ET");
+        let out = annotate(
+            "doc.pdf",
+            &src,
+            &[PageEdits {
+                page: 1,
+                text_edits: vec![edit_over_fixture_text("Changed line")],
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        assert!(
+            contains_bytes(&out.bytes, b"PZtx"),
+            "malformed Tr must not reset invisible mode"
+        );
+    }
+
+    #[test]
+    fn text_edit_survives_inline_inherited_resources() {
+        // Same as the referenced-Resources test below, but the ancestor
+        // holds an INLINE dict — which lopdf's get_page_resources misses,
+        // so the seed must walk the Parent chain itself. (page_fonts is
+        // equally blind here, so both edits fall back; the point is that
+        // /F1 must survive into the seeded page-level dict.)
+        let mut doc = Document::load_mem(&styled_pdf("Original words")).unwrap();
+        let page_id = *doc.get_pages().get(&1).unwrap();
+        let res_dict = doc
+            .get_dictionary(page_id)
+            .unwrap()
+            .get(b"Resources")
+            .ok()
+            .and_then(|o| resolve_dict(&doc, o))
+            .unwrap()
+            .clone();
+        let pages_id = doc
+            .get_dictionary(page_id)
+            .unwrap()
+            .get(b"Parent")
+            .and_then(Object::as_reference)
+            .unwrap();
+        doc.get_dictionary_mut(page_id)
+            .unwrap()
+            .remove(b"Resources");
+        if let Ok(d) = doc.get_dictionary_mut(pages_id) {
+            d.set("Resources", Object::Dictionary(res_dict));
+        }
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        let out = annotate(
+            "doc.pdf",
+            &bytes,
+            &[PageEdits {
+                page: 1,
+                text_edits: vec![edit_over_fixture_text("Changed line")],
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        let doc = Document::load_mem(&out.bytes).unwrap();
+        let page = *doc.get_pages().get(&1).unwrap();
+        let (direct, _) = doc.get_page_resources(page).unwrap();
+        let fonts = direct
+            .and_then(|d| d.get(b"Font").ok())
+            .and_then(|o| resolve_dict(&doc, o))
+            .expect("page must have a direct Font dict");
+        assert!(fonts.has(b"F1"), "inline-inherited font lost by shadowing");
+    }
+
+    #[test]
+    fn text_edit_survives_inherited_resources() {
+        // Resources on the Pages NODE, not the page: registering the
+        // fallback font must seed the new page-level dict from the
+        // inherited one, or the stripped run's own font (and everything
+        // else) stops resolving.
+        let mut doc = Document::load_mem(&styled_pdf("Original words")).unwrap();
+        let page_id = *doc.get_pages().get(&1).unwrap();
+        let res = doc
+            .get_dictionary(page_id)
+            .unwrap()
+            .get(b"Resources")
+            .unwrap()
+            .to_owned();
+        let pages_id = doc
+            .get_dictionary(page_id)
+            .unwrap()
+            .get(b"Parent")
+            .and_then(Object::as_reference)
+            .unwrap();
+        doc.get_dictionary_mut(page_id)
+            .unwrap()
+            .remove(b"Resources");
+        if let Ok(d) = doc.get_dictionary_mut(pages_id) {
+            d.set("Resources", res);
+        }
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        // One native edit + one fallback edit (non-ASCII) on the page:
+        // the fallback registers PZtx, which used to shadow /F1.
+        let out = annotate(
+            "doc.pdf",
+            &bytes,
+            &[PageEdits {
+                page: 1,
+                text_edits: vec![
+                    edit_over_fixture_text("Changed line"),
+                    TextEdit {
+                        src: (400.0, 100.0, 50.0, 20.0),
+                        text: "R\u{e9}sum\u{e9}".into(),
+                        delta: (0.0, 0.0),
+                        size: 12.0,
+                        color: (0, 0, 0),
+                        pos: (400.0, 105.0),
+                        bold: false,
+                    },
+                ],
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        let doc = Document::load_mem(&out.bytes).unwrap();
+        let page = *doc.get_pages().get(&1).unwrap();
+        let (direct, _) = doc.get_page_resources(page).unwrap();
+        let fonts = direct
+            .and_then(|d| d.get(b"Font").ok())
+            .and_then(|o| resolve_dict(&doc, o))
+            .expect("page must have a direct Font dict");
+        assert!(fonts.has(b"F1"), "inherited font lost by shadowing");
+        assert!(fonts.has(b"PZtx"), "fallback font missing");
+    }
+
+    #[test]
+    fn text_edit_never_drops_form_xobjects() {
+        // Text living inside a form can't be edited in place — the edit
+        // falls back to a cover, and (unlike redaction) the form itself
+        // MUST survive: an edit is not a license to delete shared content.
+        let out = annotate(
+            "doc.pdf",
+            &form_pdf(),
+            &[PageEdits {
+                page: 1,
+                text_edits: vec![TextEdit {
+                    src: (110.0, 605.0, 50.0, 30.0),
+                    text: "replacement".into(),
+                    delta: (0.0, 0.0),
+                    size: 24.0,
+                    color: (0, 0, 0),
+                    pos: (110.0, 610.0),
+                    bold: false,
+                }],
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        let doc = Document::load_mem(&out.bytes).unwrap();
+        let page = *doc.get_pages().get(&1).unwrap();
+        let content = Content::decode(&doc.get_page_content(page)).unwrap();
+        assert!(
+            content.operations.iter().any(|op| op.operator == "Do"),
+            "text edit deleted a form XObject"
+        );
+        assert!(
+            contains_bytes(&out.bytes, b"PZtx"),
+            "form-hosted text should fall back to cover + retype"
+        );
+    }
+
     #[test]
     fn redaction_without_widths_is_conservative() {
         // The plain fixture's font has no Widths table: any contact drops
@@ -2247,6 +3446,7 @@ mod tests {
             }],
             rects: vec![],
             redactions: vec![],
+            text_edits: vec![],
         }];
         let out = annotate("doc.pdf", &sample_pdf(2), &edits).unwrap();
         assert_eq!(out.name, "doc-edited.pdf");
@@ -2276,6 +3476,7 @@ mod tests {
             texts: vec![],
             rects: vec![],
             redactions: vec![],
+            text_edits: vec![],
         }];
         assert!(annotate("doc.pdf", &sample_pdf(1), &edits).is_ok());
     }
@@ -2303,6 +3504,7 @@ mod tests {
                 color: (255, 255, 255),
             }],
             redactions: vec![],
+            text_edits: vec![],
         }];
         let out = annotate("doc.pdf", &sample_pdf(1), &edits).unwrap();
         let doc = Document::load_mem(&out.bytes).unwrap();
@@ -2335,6 +3537,7 @@ mod tests {
             texts: vec![],
             rects: vec![],
             redactions: vec![],
+            text_edits: vec![],
         }];
         assert!(annotate("doc.pdf", &sample_pdf(1), &edits).is_err());
         assert!(annotate("doc.pdf", &sample_pdf(1), &[]).is_err());

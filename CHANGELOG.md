@@ -7,7 +7,30 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
 
 ## [Unreleased]
 
+### Fixed
+- PDF editor: retyping existing text no longer changes its look. The bake
+  now rewrites the clicked run through its ORIGINAL font resource —
+  family, bold, italics, color and scale survive because the same
+  embedded font keeps rendering it — after stripping the old glyphs
+  (true removal, not a white cover). When the font can't be reused
+  safely (CID/symbolic fonts, custom encodings, non-Latin replacement
+  text, text inside form XObjects) the editor falls back to the previous
+  white-out + Helvetica so the edit still lands.
+- PDF editor: redacting a page that contains an inline image (BI..EI —
+  some scanners emit these) now fails with a clear error instead of
+  silently corrupting the page on rewrite; the message suggests
+  flattening the PDF first. Font-preserving text edits refuse such pages
+  automatically and use the cover fallback.
+- CI: the ui-tests job tested a stale, cache-mangled bundle instead of
+  the pushed commit (the Rust cache restores `target/dx` from the
+  previous run, so the build step was skipped). The script now always
+  rebuilds the bundle on CI.
+
 ### Added
+- CONTRIBUTING.md: from-scratch dev setup (Rust + wasm target,
+  dioxus-cli, verify/UI-test scripts) and the ground rules that keep the
+  privacy promise intact. The app now links the GitHub repo from the
+  footer and the Support page.
 - PDF editor: true redaction (▓ tool). Drag a box over sensitive text and
   on bake the glyphs inside are REMOVED from the content stream — copy,
   search and text extraction find nothing — then the area is painted

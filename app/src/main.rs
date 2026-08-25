@@ -150,6 +150,13 @@ fn Shell() -> Element {
             p { class: "footer-fine",
                 "PrivZapp is free forever and runs on donations. "
                 Link { to: Route::Support {}, "Keep it alive →" }
+                " · Open source: "
+                a {
+                    href: "https://github.com/bambanggunawanid/privzapp",
+                    target: "_blank",
+                    rel: "noopener noreferrer",
+                    "GitHub"
+                }
             }
         } }
     }

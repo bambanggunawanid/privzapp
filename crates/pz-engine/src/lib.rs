@@ -267,7 +267,7 @@ Fill in name/short_name and colors in site.webmanifest.
     }
 }
 
-pub use pz_pdf::{PlacedRect, PlacedText, Stroke};
+pub use pz_pdf::{PlacedRect, PlacedText, Stroke, TextEdit};
 
 /// An image the editor placed on a page, still in its original format.
 /// `rect` is (x, y, width, height) in PDF points, y = bottom edge.
@@ -290,6 +290,8 @@ pub struct PageEdit {
     /// True-redaction boxes (PDF points, y = bottom edge): glyphs inside
     /// are removed from the content stream, then covered black.
     pub redactions: Vec<(f32, f32, f32, f32)>,
+    /// Font-preserving edits of text already in the PDF.
+    pub text_edits: Vec<TextEdit>,
 }
 
 /// The PDF editor's apply step: convert placed images to embeddable JPEGs
@@ -324,6 +326,7 @@ pub fn edit_pdf(
             texts: edit.texts,
             rects: edit.rects,
             redactions: edit.redactions,
+            text_edits: edit.text_edits,
         });
     }
     pz_pdf::annotate(name, pdf, &converted)

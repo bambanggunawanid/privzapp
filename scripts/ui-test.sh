@@ -6,8 +6,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 BUNDLE="target/dx/privzapp/release/web/public"
-if [[ ! -d "$BUNDLE" || "${FRESH_BUNDLE:-}" == "1" ]]; then
-  echo "==> building web bundle (missing or FRESH_BUNDLE=1)"
+# On CI, always rebuild: rust-cache restores a stale (and cleanup-mangled)
+# target/dx from the previous run — reusing it means testing the wrong
+# commit's bundle (or a broken one; that's how the ui-tests job went red
+# while every spec passed locally).
+if [[ ! -d "$BUNDLE" || "${FRESH_BUNDLE:-}" == "1" || -n "${CI:-}" ]]; then
+  echo "==> building web bundle (missing, FRESH_BUNDLE=1 or CI)"
   ./scripts/build-web.sh
 fi
 

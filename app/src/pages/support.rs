@@ -16,10 +16,22 @@ pub fn Support() -> Element {
                 "lights on."
             }
             div { class: "donate-row",
-                a { class: "donate-btn", href: "https://ko-fi.com/S7F125OT18", target: "_blank", rel: "noopener", "☕ Ko-fi" }
-                a { class: "donate-btn", href: "https://github.com/sponsors/bambanggunawanid", target: "_blank", rel: "noopener", "💜 GitHub Sponsors" }
+                a { class: "donate-btn", href: "https://ko-fi.com/S7F125OT18", target: "_blank", rel: "noopener noreferrer", "☕ Ko-fi" }
+                a { class: "donate-btn", href: "https://github.com/sponsors/bambanggunawanid", target: "_blank", rel: "noopener noreferrer", "💜 GitHub Sponsors" }
             }
             h2 { "Other ways to help" }
+            p {
+                "PrivZapp is open source — the whole app, engine and build "
+                "live at "
+                a {
+                    href: "https://github.com/bambanggunawanid/privzapp",
+                    target: "_blank",
+                    rel: "noopener noreferrer",
+                    "github.com/bambanggunawanid/privzapp"
+                }
+                ". Star it, report bugs, or send a pull request (the repo's "
+                "CONTRIBUTING.md walks through the dev setup from scratch)."
+            }
             ul {
                 li { "Star and share the project." }
                 li { "Report bugs — every report makes the tools sturdier." }

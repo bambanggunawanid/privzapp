@@ -124,16 +124,25 @@ Requires stable Rust with the `wasm32-unknown-unknown` target and
 
 Details, designs and rationale live in [docs/ROADMAP.md](docs/ROADMAP.md).
 
-- [ ] Web Workers so huge files never block the UI thread ([design](docs/adr/0004-web-worker-offloading.md))
+- [x] Web Workers so huge files never block the UI thread ([design](docs/adr/0004-web-worker-offloading.md))
 - [x] PWA manifest + service worker → installable, explicitly offline
 - [x] Drag-and-drop (folder drops still to come)
 - [x] PDF: reorder pages, images → PDF, watermark
-- [ ] PDF: page → image export (blocked on a wasm-safe rasterizer)
+- [ ] PDF: page → image export (the editor's "Pages as PNG" ships today;
+      a standalone tool page waits on a wasm-safe rasterizer)
 - [x] Image: batch rename, EXIF strip (privacy!), crop
 - [ ] Video/GIF tools via ffmpeg compiled to WASM ([design](docs/adr/0005-ffmpeg-wasm.md))
 - [x] Password-protect any file (AES-256 `.pzv` vaults via `pz-crypto`)
 - [ ] Opt-in telemetry wiring + public dashboard of the little we collect
 - [x] Donation integrations ([Ko-fi](https://ko-fi.com/S7F125OT18), [GitHub Sponsors](https://github.com/sponsors/bambanggunawanid))
+
+## Contributing
+
+The project lives at <https://github.com/bambanggunawanid/privzapp> — stars,
+bug reports and pull requests all help. [CONTRIBUTING.md](CONTRIBUTING.md)
+walks through the from-scratch dev setup (Rust + wasm target, `dioxus-cli`,
+the verify/UI-test scripts) and the ground rules that keep the privacy
+promise intact.
 
 ## License
 

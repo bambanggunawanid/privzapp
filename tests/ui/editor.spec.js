@@ -1,5 +1,6 @@
 // UI tests for the PDF editor workspace. Each test pins a behavior the
 // owner reported broken at least once — keep them green.
+import { readFileSync } from "node:fs";
 import { test, expect } from "@playwright/test";
 import { samplePdf } from "./fixtures/sample-pdf.mjs";
 import { samplePng } from "./fixtures/sample-png.mjs";
@@ -130,6 +131,34 @@ test.describe("editor workspace", () => {
     const rgb = style.color.match(/\d+/g).map(Number);
     for (const ch of rgb.slice(0, 3)) expect(ch).toBeLessThan(110);
     expect(["400", "normal"]).toContain(style.weight);
+  });
+
+  test("editing existing PDF text keeps the original font (no Helvetica swap)", async ({ page }) => {
+    await openPdf(page);
+    const span = page.locator(".pz-textlayer span", { hasText: "Hello PrivZapp" }).first();
+    await span.click();
+    const box = page.locator(".pz-text").first();
+    await expect(box).toBeFocused();
+    await box.press("ControlOrMeta+a");
+    await box.pressSequentially("Edited PrivZapp");
+    // Export bakes the pending edit. The downloaded PDF must be rewritten
+    // through the run's ORIGINAL font resource — the Helvetica fallback
+    // (resource "PZtx") appearing means the style-changing swap is back.
+    await page.locator("button", { hasText: "Export ↓" }).click();
+    const download = page.waitForEvent("download");
+    await page.locator("button", { hasText: "⬇ Download PDF" }).click();
+    // Resource names live in the (always-plain) page dictionaries, so this
+    // scan is reliable; content-stream literals are NOT (lopdf may deflate
+    // the rebuilt stream), which is why the text itself is asserted through
+    // PDF.js below instead of raw bytes.
+    const bytes = readFileSync(await (await download).path());
+    expect(bytes.includes("PZtx")).toBe(false);
+    // The bake re-renders the mutated document: the old text is gone
+    // from PDF.js's own text layer, not just covered.
+    await expect(page.locator(".pz-textlayer").first()).toContainText("Edited PrivZapp", {
+      timeout: 30_000,
+    });
+    await expect(page.locator(".pz-textlayer").first()).not.toContainText("Hello");
   });
 
   test("inserted image is a live object: lands at source size, drags, resizes, deletes", async ({ page }) => {

@@ -14,7 +14,7 @@
 use dioxus::document::eval;
 use dioxus::prelude::*;
 use pz_core::{stem, InputFile, OutputFile, ToolOptions};
-use pz_engine::{EditImage, PageEdit, PlacedRect, PlacedText, Stroke};
+use pz_engine::{EditImage, PageEdit, PlacedRect, PlacedText, Stroke, TextEdit};
 use serde::Deserialize;
 
 use crate::save::{object_url, save_file};
@@ -92,11 +92,31 @@ struct ExportPage {
     rects: Vec<ExportRect>,
     #[serde(default)]
     redacts: Vec<ExportRedact>,
+    #[serde(default)]
+    edits: Vec<ExportTextEdit>,
 }
 
 #[derive(Deserialize)]
 struct ExportRedact {
     rect: (f32, f32, f32, f32),
+}
+
+/// A retyped span of text that already exists in the PDF: `src` is the
+/// original span's rect, `dx`/`dy` how far the box was dragged since.
+#[derive(Deserialize)]
+struct ExportTextEdit {
+    src: (f32, f32, f32, f32),
+    text: String,
+    color: String,
+    size: f32,
+    #[serde(default)]
+    bold: bool,
+    x: f32,
+    y: f32,
+    #[serde(default)]
+    dx: f32,
+    #[serde(default)]
+    dy: f32,
 }
 
 #[derive(Deserialize)]
@@ -197,6 +217,19 @@ async fn pending_edits(attachments: &[(String, Vec<u8>)]) -> Result<Vec<PageEdit
                 })
                 .collect(),
             redactions: p.redacts.into_iter().map(|r| r.rect).collect(),
+            text_edits: p
+                .edits
+                .into_iter()
+                .map(|e| TextEdit {
+                    src: e.src,
+                    text: e.text,
+                    delta: (e.dx, e.dy),
+                    size: e.size,
+                    color: hex_color(&e.color),
+                    pos: (e.x, e.y),
+                    bold: e.bold,
+                })
+                .collect(),
         })
         .filter(|p| {
             !p.strokes.is_empty()
@@ -204,6 +237,7 @@ async fn pending_edits(attachments: &[(String, Vec<u8>)]) -> Result<Vec<PageEdit
                 || !p.texts.is_empty()
                 || !p.rects.is_empty()
                 || !p.redactions.is_empty()
+                || !p.text_edits.is_empty()
         })
         .collect())
 }
