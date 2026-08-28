@@ -5,6 +5,7 @@
 //! through `pz-engine`; no bytes ever leave the device.
 
 mod engine;
+mod icons;
 mod pages;
 mod save;
 
@@ -145,7 +146,11 @@ fn Shell() -> Element {
                             Link {
                                 to: Route::ToolPage { slug: tool.slug.to_string() },
                                 onclick: move |_| menu.set(false),
-                                span { class: "mega-ico", {tool.icon} }
+                                if let Some(src) = icons::tool_icon(tool.slug) {
+                                    img { class: "mega-ico mega-ico-svg", src, alt: "" }
+                                } else {
+                                    span { class: "mega-ico", {tool.icon} }
+                                }
                                 {tool.name}
                             }
                         }

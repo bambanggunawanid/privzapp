@@ -290,6 +290,20 @@ a:hover { text-decoration: underline; }
 .cat-archive { background: rgba(251, 191, 36, 0.16); }
 .cat-security { background: rgba(167, 139, 250, 0.18); }
 
+/* SVG tile icons (app/assets/icons) paint their own rounded tile —
+   size them like the emoji tiles but without the category tint. */
+.tool-tile-svg { background: none; }
+.mega-ico-svg { height: 22px; border-radius: 6px; }
+.tool-icon-svg { width: 42px; height: 42px; border-radius: 12px; }
+.tool-icon-svg.big { width: 52px; height: 52px; }
+.rel-ico-svg {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  vertical-align: -4px;
+  margin-right: 6px;
+}
+
 /* ---- tool page ---- */
 
 .tool-head {

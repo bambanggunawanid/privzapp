@@ -26,6 +26,13 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
   previous run, so the build step was skipped). The script now always
   rebuilds the bundle on CI.
 
+### Changed
+- The 14 PDF tools now show custom SVG tile icons (gold/blue on a plum
+  tile, `app/assets/icons/`) on the home grid, the all-tools menu, tool
+  page headers and related-tools links. Tools without an SVG yet keep
+  their emoji tile; adding one is dropping `<slug>.svg` in the folder
+  and one match arm in `app/src/icons.rs`.
+
 ### Added
 - CONTRIBUTING.md: from-scratch dev setup (Rust + wasm target,
   dioxus-cli, verify/UI-test scripts) and the ground rules that keep the

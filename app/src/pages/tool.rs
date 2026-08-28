@@ -238,7 +238,11 @@ pub fn ToolPage(slug: String) -> Element {
             document::Meta { name: "description", content: seo.description }
         }
         section { class: "tool-head",
-            div { class: "tool-icon big", {meta.icon} }
+            if let Some(src) = crate::icons::tool_icon(meta.slug) {
+                img { class: "tool-icon-svg big", src, alt: "" }
+            } else {
+                div { class: "tool-icon big", {meta.icon} }
+            }
             div {
                 h1 { {meta.name} }
                 p { class: "muted", {meta.tagline} }
@@ -783,7 +787,13 @@ pub fn ToolPage(slug: String) -> Element {
                         Link {
                             class: "related-link",
                             to: Route::ToolPage { slug: other.slug.to_string() },
-                            {other.icon} " " {other.name}
+                            if let Some(src) = crate::icons::tool_icon(other.slug) {
+                                img { class: "rel-ico-svg", src, alt: "", loading: "lazy" }
+                            } else {
+                                {other.icon}
+                                " "
+                            }
+                            {other.name}
                         }
                     }
                 }

@@ -16,6 +16,18 @@ test.describe("home + nav", () => {
     await expect(page.locator(".tool-section")).toHaveCount(4);
   });
 
+  test("PDF tools show their SVG tile icons; others keep the emoji tile", async ({ page }) => {
+    // All 14 PDF-tool cards render the custom SVG (self-tiled, so no
+    // category-tint class), and the src survives dx asset hashing.
+    await expect(page.locator("img.tool-tile-svg")).toHaveCount(14);
+    const merge = page
+      .locator(".tool-card", { has: page.locator("h3", { hasText: "Merge PDF" }) })
+      .locator("img.tool-tile-svg");
+    await expect(merge).toHaveAttribute("src", /merge-pdf.*\.svg/);
+    // Non-PDF categories still use the emoji tiles until their sets land.
+    await expect(page.locator("span.tool-tile.cat-image").first()).toBeVisible();
+  });
+
   test("nav shows the star-on-GitHub button linking the repo", async ({ page }) => {
     const star = page.locator(".nav-links .gh-star");
     await expect(star).toBeVisible();

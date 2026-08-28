@@ -64,7 +64,18 @@ pub fn Home() -> Element {
                             Link {
                                 class: "tool-card",
                                 to: Route::ToolPage { slug: tool.slug.to_string() },
-                                span { class: format!("tool-tile {}", cat_class(cat)), {tool.icon} }
+                                // The SVG tiles paint their own plum
+                                // background — no category tint on top.
+                                if let Some(src) = crate::icons::tool_icon(tool.slug) {
+                                    img {
+                                        class: "tool-tile tool-tile-svg",
+                                        src,
+                                        alt: "",
+                                        loading: "lazy",
+                                    }
+                                } else {
+                                    span { class: format!("tool-tile {}", cat_class(cat)), {tool.icon} }
+                                }
                                 h3 { {tool.name} }
                                 p { {tool.tagline} }
                             }
