@@ -509,7 +509,7 @@ pub fn ToolPage(slug: String) -> Element {
                             },
                             OptionKind::PageRange => rsx! {
                                 div { class: "opt",
-                                    label { "Pages (e.g. 1-3,5 — empty = every page as its own PDF)" }
+                                    label { "Pages (e.g. 1-3,5 — empty = every page, each as its own file)" }
                                     input {
                                         r#type: "text",
                                         placeholder: "1-3,5",
