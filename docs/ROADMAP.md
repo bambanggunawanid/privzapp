@@ -6,7 +6,7 @@ it: client-side only, wasm32-safe, free forever (see ADR-0001).
 
 ## Done
 
-- **29 tools** across PDF / Image / Compress / Protect (see README table),
+- **32 tools** across PDF / Image / Compress / Protect (see README table),
   covering most of the iLovePDF/iLoveIMG catalog that is feasible fully
   client-side — including standard AES-256 PDF password protection and
   removal, page numbers, PDF crop/repair/text-extraction, and the common
@@ -21,18 +21,12 @@ it: client-side only, wasm32-safe, free forever (see ADR-0001).
   still doesn't exist; this borrows the editor's renderer instead of
   waiting for one.
 - **Password vaults**: AES-256-GCM `.pzv` files (ADR-0003).
+- **Web Worker offloading** (2026-08-25, ADR-0004 Accepted): the engine
+  runs off the main thread in the built bundle, transferable
+  `ArrayBuffer`s avoid copies, and the UI falls back to inline execution
+  where workers are unavailable — big files no longer freeze the tab.
 
 ## Approved, designed, not yet built
-
-### Web Worker offloading (ADR-0004, Proposed)
-Large files currently run the engine on the main thread; a 200 MB zip can
-freeze the tab for seconds. Design: a second wasm binary (worker entry
-point) exposing `run(slug, files, opts)` behind `postMessage`, transferable
-`ArrayBuffer`s to avoid copies, UI falls back to inline execution where
-workers are unavailable. Deliberately **not** wasm-threads: those need
-cross-origin isolation headers and nightly features. Blocked only on being
-able to verify in a real browser — do not land blind; needs a manual
-smoke-test pass (`dx serve` + large file) before merge.
 
 ### ffmpeg-to-WASM video/GIF tools (ADR-0005, Proposed)
 Video convert/trim/GIF-ify, still fully client-side. Design: ffmpeg.wasm

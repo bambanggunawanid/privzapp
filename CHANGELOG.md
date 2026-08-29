@@ -39,7 +39,7 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
   is baked into each SVG (they load via `<img>`, so page CSS can't reach
   inside); the palette and its 3:1 contrast floor are documented in
   `app/assets/icons/README.md`.
-- All 31 tools now show custom SVG tile icons (gold/blue on a plum tile,
+- All 32 tools now show custom SVG tile icons (gold/blue on a plum tile,
   `app/assets/icons/`) on the home grid, the all-tools menu, tool page
   headers and related-tools links — the 14 PDF tiles plus the image,
   archive and security sets. A tool added without an icon still falls

@@ -20,6 +20,7 @@ pub fn tool_icon(slug: &str) -> Option<Asset> {
         "page-numbers-pdf" => asset!("/assets/icons/page-numbers-pdf.svg"),
         "crop-pdf" => asset!("/assets/icons/crop-pdf.svg"),
         "extract-text-pdf" => asset!("/assets/icons/extract-text-pdf.svg"),
+        "pdf-to-images" => asset!("/assets/icons/pdf-to-images.svg"),
         "repair-pdf" => asset!("/assets/icons/repair-pdf.svg"),
         "protect-pdf" => asset!("/assets/icons/protect-pdf.svg"),
         "unlock-pdf" => asset!("/assets/icons/unlock-pdf.svg"),
