@@ -27,11 +27,18 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
   rebuilds the bundle on CI.
 
 ### Changed
-- The 14 PDF tools now show custom SVG tile icons (gold/blue on a plum
-  tile, `app/assets/icons/`) on the home grid, the all-tools menu, tool
-  page headers and related-tools links. Tools without an SVG yet keep
-  their emoji tile; adding one is dropping `<slug>.svg` in the folder
-  and one match arm in `app/src/icons.rs`.
+- Tool tile icons are now coloured by category — PDF rose, image sky,
+  archive amber, security violet, hue-matched to the `.cat-*` tints the
+  grid already used — instead of every tile sharing one plum. The colour
+  is baked into each SVG (they load via `<img>`, so page CSS can't reach
+  inside); the palette and its 3:1 contrast floor are documented in
+  `app/assets/icons/README.md`.
+- All 31 tools now show custom SVG tile icons (gold/blue on a plum tile,
+  `app/assets/icons/`) on the home grid, the all-tools menu, tool page
+  headers and related-tools links — the 14 PDF tiles plus the image,
+  archive and security sets. A tool added without an icon still falls
+  back to its emoji tile; giving it one is dropping `<slug>.svg` in the
+  folder and one match arm in `app/src/icons.rs`.
 
 ### Added
 - CONTRIBUTING.md: from-scratch dev setup (Rust + wasm target,

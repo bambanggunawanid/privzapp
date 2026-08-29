@@ -1,8 +1,9 @@
-//! Per-tool SVG tile icons (app/assets/icons/<slug>.svg). Tools without
-//! an SVG yet fall back to their registry emoji at every render site.
+//! Per-tool SVG tile icons (app/assets/icons/<slug>.svg). Every tool in
+//! the registry has one; a tool added without an icon falls back to its
+//! registry emoji at every render site rather than rendering nothing.
 //! The SVGs are referenced as <img src> — never inlined: they share
-//! internal gradient ids ("g"/"b"/"v"), which would collide if several
-//! were inlined into one document.
+//! internal gradient ids ("g"/"b"/"m"/"v"), which would collide if
+//! several were inlined into one document.
 
 use dioxus::prelude::*;
 
@@ -22,6 +23,23 @@ pub fn tool_icon(slug: &str) -> Option<Asset> {
         "repair-pdf" => asset!("/assets/icons/repair-pdf.svg"),
         "protect-pdf" => asset!("/assets/icons/protect-pdf.svg"),
         "unlock-pdf" => asset!("/assets/icons/unlock-pdf.svg"),
+        "convert-img" => asset!("/assets/icons/convert-img.svg"),
+        "resize-img" => asset!("/assets/icons/resize-img.svg"),
+        "compress-img" => asset!("/assets/icons/compress-img.svg"),
+        "rotate-img" => asset!("/assets/icons/rotate-img.svg"),
+        "flip-img" => asset!("/assets/icons/flip-img.svg"),
+        "upscale-img" => asset!("/assets/icons/upscale-img.svg"),
+        "grayscale-img" => asset!("/assets/icons/grayscale-img.svg"),
+        "blur-img" => asset!("/assets/icons/blur-img.svg"),
+        "watermark-img" => asset!("/assets/icons/watermark-img.svg"),
+        "strip-exif" => asset!("/assets/icons/strip-exif.svg"),
+        "crop-img" => asset!("/assets/icons/crop-img.svg"),
+        "favicon-pack" => asset!("/assets/icons/favicon-pack.svg"),
+        "rename-batch" => asset!("/assets/icons/rename-batch.svg"),
+        "zip-files" => asset!("/assets/icons/zip-files.svg"),
+        "unzip" => asset!("/assets/icons/unzip.svg"),
+        "encrypt-file" => asset!("/assets/icons/encrypt-file.svg"),
+        "decrypt-file" => asset!("/assets/icons/decrypt-file.svg"),
         _ => return None,
     })
 }

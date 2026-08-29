@@ -16,16 +16,25 @@ test.describe("home + nav", () => {
     await expect(page.locator(".tool-section")).toHaveCount(4);
   });
 
-  test("PDF tools show their SVG tile icons; others keep the emoji tile", async ({ page }) => {
-    // All 14 PDF-tool cards render the custom SVG (self-tiled, so no
-    // category-tint class), and the src survives dx asset hashing.
-    await expect(page.locator("img.tool-tile-svg")).toHaveCount(14);
-    const merge = page
-      .locator(".tool-card", { has: page.locator("h3", { hasText: "Merge PDF" }) })
-      .locator("img.tool-tile-svg");
-    await expect(merge).toHaveAttribute("src", /merge-pdf.*\.svg/);
-    // Non-PDF categories still use the emoji tiles until their sets land.
-    await expect(page.locator("span.tool-tile.cat-image").first()).toBeVisible();
+  test("every tool card shows its SVG tile icon", async ({ page }) => {
+    // All 31 tools have a custom SVG (self-tiled, so no category-tint
+    // class), and the srcs survive dx asset hashing. The emoji tile is
+    // the fallback for a tool added without an icon — none left today.
+    const cards = await page.locator(".tool-card").count();
+    expect(cards).toBe(31);
+    await expect(page.locator("img.tool-tile-svg")).toHaveCount(31);
+    await expect(page.locator("span.tool-tile")).toHaveCount(0);
+    for (const [name, slug] of [
+      ["Merge PDF", "merge-pdf"],
+      ["Strip Metadata", "strip-exif"],
+      ["Extract ZIP", "unzip"],
+      ["Encrypt File", "encrypt-file"],
+    ]) {
+      const tile = page
+        .locator(".tool-card", { has: page.locator("h3", { hasText: name }) })
+        .locator("img.tool-tile-svg");
+      await expect(tile).toHaveAttribute("src", new RegExp(`${slug}.*\\.svg`));
+    }
   });
 
   test("nav shows the star-on-GitHub button linking the repo", async ({ page }) => {
@@ -39,6 +48,37 @@ test.describe("home + nav", () => {
     await expect(star).toHaveAttribute("rel", /noopener/);
     await expect(star).toHaveAttribute("rel", /noreferrer/);
     await expect(star).toHaveAttribute("target", "_blank");
+  });
+
+  // The tile colour is baked into each SVG (they load via <img>, so page
+  // CSS can't tint them) — this pins every icon to its category's tile so
+  // a new one can't quietly ship in the wrong group's colour.
+  test("tile icons are coloured by category group", async ({ page }) => {
+    const TILE = {
+      PDF: "#52304D",
+      Image: "#24455C",
+      Compress: "#4C3919", // ToolCategory::Archive
+      Protect: "#40325E", // ToolCategory::Security
+    };
+    const sections = await page.locator(".tool-section").count();
+    expect(sections).toBe(4);
+    let checked = 0;
+    for (let i = 0; i < sections; i++) {
+      const section = page.locator(".tool-section").nth(i);
+      const heading = (await section.locator("h2").textContent()).trim();
+      const group = Object.keys(TILE).find((k) => heading.startsWith(k));
+      expect(group, `unmapped section heading: ${heading}`).toBeTruthy();
+      const srcs = await section.locator("img.tool-tile-svg").evaluateAll((els) =>
+        els.map((e) => e.getAttribute("src")),
+      );
+      expect(srcs.length).toBeGreaterThan(0);
+      for (const src of srcs) {
+        const svg = await (await page.request.get(src)).text();
+        expect(svg, `${src} should carry the ${group} tile`).toContain(TILE[group]);
+        checked++;
+      }
+    }
+    expect(checked).toBe(31);
   });
 
   test("all-tools mega menu opens and navigates", async ({ page }) => {
