@@ -92,17 +92,32 @@ fn Shell() -> Element {
         header { class: "nav",
             Link { class: "brand", to: Route::Home {},
                 img { class: "brand-logo", src: LOGO_NAV, alt: "PrivZapp" }
-                span { "PrivZapp" }
+                span { class: "brand-name", "PrivZapp" }
             }
             nav { class: "nav-links",
                 Link { class: "nav-quick", to: Route::ToolPage { slug: "merge-pdf".into() }, "Merge PDF" }
                 Link { class: "nav-quick", to: Route::ToolPage { slug: "compress-pdf".into() }, "Compress PDF" }
                 Link { class: "nav-quick", to: Route::ToolPage { slug: "edit-pdf".into() }, "Edit PDF" }
                 Link { class: "nav-quick", to: Route::ToolPage { slug: "compress-img".into() }, "Compress Image" }
+                // Narrow screens drop the wordings and keep the glyphs:
+                // four chips' worth of labels overflow a phone nav bar.
                 button {
                     class: if menu() { "nav-alltools open" } else { "nav-alltools" },
                     onclick: move |_| menu.set(!menu()),
-                    "All tools "
+                    title: "All tools",
+                    aria_label: "All tools",
+                    svg {
+                        class: "nav-alltools-glyph",
+                        view_box: "0 0 16 16",
+                        width: "15",
+                        height: "15",
+                        "aria-hidden": "true",
+                        rect { x: "1", y: "1", width: "6", height: "6", rx: "1.6", fill: "currentColor" }
+                        rect { x: "9", y: "1", width: "6", height: "6", rx: "1.6", fill: "currentColor" }
+                        rect { x: "1", y: "9", width: "6", height: "6", rx: "1.6", fill: "currentColor" }
+                        rect { x: "9", y: "9", width: "6", height: "6", rx: "1.6", fill: "currentColor" }
+                    }
+                    span { class: "nav-alltools-label", "All tools" }
                     span { class: "ed-caret", {if menu() { "▴" } else { "▾" }} }
                 }
                 Link { to: Route::Privacy {}, "Privacy" }
@@ -128,7 +143,14 @@ fn Shell() -> Element {
                     span { class: "gh-star-label", "Star" }
                     span { class: "gh-star-glyph", "★" }
                 }
-                Link { class: "support-cta", to: Route::Support {}, "♥ Support us" }
+                Link {
+                    class: "support-cta",
+                    to: Route::Support {},
+                    title: "Support us",
+                    aria_label: "Support us",
+                    span { class: "support-glyph", "♥" }
+                    span { class: "support-label", "Support us" }
+                }
             }
         }
         if menu() {

@@ -81,6 +81,39 @@ test.describe("home + nav", () => {
     expect(checked).toBe(31);
   });
 
+  // Regression: on a phone the "All tools" and "Support us" labels wrapped
+  // to a second line and spilled out of the fixed-height nav bar.
+  test("phone nav: chips go icon-only and stay on one row", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.locator(".nav-alltools-label")).toBeHidden();
+    await expect(page.locator(".support-label")).toBeHidden();
+    await expect(page.locator(".gh-star-label")).toBeHidden();
+    await expect(page.locator(".nav-alltools-glyph")).toBeVisible();
+    await expect(page.locator(".support-glyph")).toBeVisible();
+
+    const box = await page.evaluate(() => {
+      const links = document.querySelector(".nav-links");
+      const chips = [...links.children].map((e) => e.getBoundingClientRect());
+      return {
+        navHeight: Math.round(document.querySelector(".nav").getBoundingClientRect().height),
+        linksOverflow: links.scrollWidth - links.clientWidth,
+        rightEdge: Math.round(Math.max(...chips.map((r) => r.right))),
+        clientWidth: document.documentElement.clientWidth,
+        docOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      };
+    });
+    expect(box.navHeight).toBe(58);
+    expect(box.linksOverflow).toBe(0);
+    expect(box.docOverflow).toBe(0);
+    expect(box.rightEdge).toBeLessThanOrEqual(box.clientWidth);
+
+    // Icon-only, but still named for screen readers — and still opens.
+    await expect(page.locator(".nav-alltools")).toHaveAttribute("aria-label", "All tools");
+    await expect(page.locator(".support-cta")).toHaveAttribute("aria-label", "Support us");
+    await page.locator(".nav-alltools").click();
+    await expect(page.locator(".megamenu")).toBeVisible();
+  });
+
   test("all-tools mega menu opens and navigates", async ({ page }) => {
     await page.locator(".nav-alltools").click();
     await expect(page.locator(".megamenu")).toBeVisible();

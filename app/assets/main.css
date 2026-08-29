@@ -69,11 +69,18 @@ a:hover { text-decoration: underline; }
   display: flex;
   align-items: center;
   gap: 20px;
+  flex-wrap: nowrap;
 }
+/* Nav chips must never wrap to a second line: .nav is a fixed 58px, so a
+   wrapped label spills out of the bar instead of growing it. */
+.nav-links > * { white-space: nowrap; }
 .nav-links a { color: var(--muted); font-weight: 500; }
 .nav-links a:hover { color: var(--text); text-decoration: none; }
 
 .support-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: #ffb3c1 !important;
   border: 1px solid rgba(255, 179, 193, 0.35);
   padding: 6px 14px;
@@ -122,6 +129,25 @@ a:hover { text-decoration: underline; }
 }
 .nav-alltools:hover,
 .nav-alltools.open { color: var(--text); border-color: var(--accent); }
+/* The grid glyph only stands in for the label once the label is gone. */
+.nav-alltools-glyph { display: none; }
+
+/* Phone/tablet nav: every chip goes icon-only (the GitHub chip already
+   did) so "All tools" and "Support us" stop wrapping and overflowing the
+   bar. The words survive as title/aria-label for screen readers. */
+@media (max-width: 700px) {
+  .nav-alltools-glyph { display: block; }
+  .nav-alltools-label,
+  .support-label { display: none; }
+  .nav-alltools,
+  .support-cta { padding: 6px 10px; }
+  .support-glyph { font-size: 1.05rem; line-height: 1; }
+}
+@media (max-width: 380px) {
+  /* Last resort before the chips start colliding: the logo carries the
+     brand on its own. */
+  .brand-name { display: none; }
+}
 
 .mega-backdrop { position: fixed; inset: 0; z-index: 19; }
 .megamenu {

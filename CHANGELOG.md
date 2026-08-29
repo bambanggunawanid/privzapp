@@ -8,6 +8,12 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
 ## [Unreleased]
 
 ### Fixed
+- Mobile nav: the "All tools" and "Support us" labels wrapped to a second
+  line and spilled out of the fixed-height bar on phones. Below 700px
+  every nav chip is now icon-only (a grid glyph, the GitHub mark, a
+  heart) with the wording kept as `title`/`aria-label`; below 380px the
+  logo carries the brand alone. A UI test pins the one-row layout at
+  390px so it can't come back.
 - PDF editor: retyping existing text no longer changes its look. The bake
   now rewrites the clicked run through its ORIGINAL font resource —
   family, bold, italics, color and scale survive because the same
