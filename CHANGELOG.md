@@ -47,6 +47,14 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
   folder and one match arm in `app/src/icons.rs`.
 
 ### Added
+- **PDF to Image**: every page of a PDF as a PNG, JPG or WebP, at 1x-4x
+  (72-288 DPI), with an optional page range — one page downloads as an
+  image, several as a .zip. Pure-Rust rasterization still doesn't exist,
+  so the pages are rendered by the browser's bundled PDF.js and packaged
+  by the engine (ADR-0009, amending ADR-0007). `ToolMeta` gains a
+  `pipeline` field so this exception is declared rather than inferred from
+  the slug: `pz_engine::run` rejects browser-rendered tools outright
+  instead of looking unimplemented.
 - CONTRIBUTING.md: from-scratch dev setup (Rust + wasm target,
   dioxus-cli, verify/UI-test scripts) and the ground rules that keep the
   privacy promise intact. The app now links the GitHub repo from the

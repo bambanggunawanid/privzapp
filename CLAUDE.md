@@ -120,6 +120,13 @@ crates that compile to both native and wasm32.
 - PWA files must sit at the site root (SW scope rule) — that's why they're
   copied by `scripts/build-web.sh` instead of going through `asset!()`
   hashing. In `dx serve` dev they 404 and degrade silently; that's expected.
+- Rasterizing a PDF page is the one job the engine can't do: no pure-Rust
+  renderer exists. `pdf-to-images` is therefore
+  `ToolPipeline::BrowserRender` — `app/src/render.rs` +
+  `app/assets/pdfrender.js` render via the bundled PDF.js and the engine
+  only zips the result (ADR-0009). `pz_engine::run` rejects such slugs on
+  purpose; don't "fix" that by adding an arm. Every other tool stays
+  `ToolPipeline::Engine`.
 - The PDF editor (`app/src/pages/editor.rs` + `app/assets/editor.js`) is
   the one sanctioned JS-library exception: bundled PDF.js renders pages,
   Rust does ALL mutation (`pz_pdf::annotate`). Don't add other JS libs or

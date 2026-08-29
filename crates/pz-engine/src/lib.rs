@@ -6,7 +6,7 @@
 
 #![forbid(unsafe_code)]
 
-use pz_core::{tool_by_slug, InputFile, OutputFile, PzError, ToolOptions};
+use pz_core::{tool_by_slug, InputFile, OutputFile, PzError, ToolOptions, ToolPipeline};
 
 /// Run tool `slug` over `files` with `opts`.
 pub fn run(
@@ -20,6 +20,16 @@ pub fn run(
         return Err(PzError::Invalid(format!(
             "\"{}\" needs at least {} file(s)",
             meta.name, meta.min_files
+        )));
+    }
+    // The engine stays pure: a tool whose pages must be rasterized has no
+    // headless path (no pure-Rust PDF renderer exists — ADR-0009). The app
+    // renders in the browser and calls back here to package the result, so
+    // reaching this with such a slug means the caller took the wrong path.
+    if meta.pipeline == ToolPipeline::BrowserRender {
+        return Err(PzError::Unsupported(format!(
+            "\"{}\" needs the browser to render the pages; it cannot run through the engine directly",
+            meta.name
         )));
     }
 
@@ -381,6 +391,22 @@ mod tests {
     #[test]
     fn unknown_tool_errors() {
         assert!(run("nope", &[], &ToolOptions::default()).is_err());
+    }
+
+    /// A browser-rendered tool must fail loudly here rather than look like
+    /// an unimplemented slug — the app is supposed to render first.
+    #[test]
+    fn browser_render_tools_are_rejected() {
+        // Rejected before any parsing, so the bytes don't have to be a PDF.
+        let files = vec![InputFile {
+            name: "in.pdf".to_string(),
+            bytes: b"%PDF-1.7\n".to_vec(),
+        }];
+        let err = run("pdf-to-images", &files, &ToolOptions::default()).unwrap_err();
+        match err {
+            PzError::Unsupported(m) => assert!(m.contains("browser"), "unexpected message: {m}"),
+            other => panic!("expected Unsupported, got {other:?}"),
+        }
     }
 
     #[test]

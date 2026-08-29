@@ -15,6 +15,11 @@ it: client-side only, wasm32-safe, free forever (see ADR-0001).
   (`scripts/build-web.sh` puts manifest/service-worker/icons at the site
   root; cache-first is safe because dx fingerprints assets).
 - **Drag-and-drop** onto the tool page dropzone.
+- **PDF page → image export** (2026-08-29): the PDF to Image tool renders
+  pages with the bundled PDF.js and packages them in the engine — PNG/JPG/
+  WebP, 1x-4x, optional page range (ADR-0009). Pure-Rust rasterization
+  still doesn't exist; this borrows the editor's renderer instead of
+  waiting for one.
 - **Password vaults**: AES-256-GCM `.pzv` files (ADR-0003).
 
 ## Approved, designed, not yet built
@@ -39,12 +44,6 @@ budget (~25 MB), and a licensing pass (LGPL build config, no GPL codecs) —
 none of which fit the current container. First concrete step when picked
 up: prototype `ffmpeg.wasm` npm package behind a feature-flagged route.
 
-### PDF page → image export
-Blocked: pure-Rust PDF *rasterization* doesn't exist at usable fidelity
-(`lopdf` parses but doesn't render; pdfium/mupdf are C). Options ranked:
-pdfium-wasm side module (same lazy-load pattern as ffmpeg), or wait for
-`hayro`/`pdf-render` maturity. Revisit after the ffmpeg pattern exists.
-
 ### Folder support for drag-and-drop
 Dropping a directory needs `webkitGetAsEntry` recursion (JS interop beyond
 what Dioxus events expose today). Plan: small `wasm-bindgen` helper walking
@@ -60,9 +59,9 @@ path:
   layout engine (LibreOffice-class). Candidate: a trimmed
   LibreOffice-WASM or docx-targeted generator fed by `extract_text` —
   research item, large.
-- **PDF → JPG / PDF thumbnails**: partially unblocked — the editor now
-  bundles PDF.js (ADR-0007), whose canvas render can be exported as
-  PNG/JPG. Wire an "export pages as images" flow through the same module.
+- **PDF → JPG**: done (ADR-0009). What remains in this family is
+  *thumbnail sheets* (contact-sheet style, several pages per image), which
+  is a compositing job on top of the same render.
 - **OCR (scanned PDFs → text)**: tesseract-wasm exists (~15 MB); viable
   later behind lazy loading, same isolation rules as ffmpeg.
 - **AI features (background removal, face blur, AI upscale)**: need ONNX

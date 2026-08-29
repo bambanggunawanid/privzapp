@@ -135,6 +135,27 @@ pub enum OptionKind {
     ScaleFactor,
     /// 1..=100 effect-strength slider (e.g. blur).
     Strength,
+    /// Output format select for PDF page rasterization (PNG/JPG/WebP).
+    RasterFormat,
+    /// 1x-4x render scale for PDF page rasterization (1x = 72 DPI).
+    RenderScale,
+}
+
+/// How a tool's work actually gets done.
+///
+/// Almost everything is `Engine`: a pure `pz_engine::run` call, bytes in →
+/// bytes out, off on a Web Worker (ADR-0002/0004). `BrowserRender` marks
+/// the exception — a tool that needs the browser to *rasterize* a PDF
+/// first, which no pure-Rust crate can do (ADR-0009). The app dispatches
+/// on this instead of matching slugs, so a new tool has to state which it
+/// is, and `pz_engine::run` rejects `BrowserRender` slugs outright.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolPipeline {
+    /// Pure engine call. The default for every tool.
+    Engine,
+    /// Pages are rendered in the browser (PDF.js), then the engine packages
+    /// the result. Web/desktop only — there is no headless path.
+    BrowserRender,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -151,6 +172,8 @@ pub struct ToolMeta {
     pub min_files: usize,
     pub options: &'static [OptionKind],
     pub icon: &'static str,
+    /// Which execution path runs this tool (see `ToolPipeline`).
+    pub pipeline: ToolPipeline,
 }
 
 pub const TOOLS: &[ToolMeta] = &[
@@ -165,6 +188,7 @@ pub const TOOLS: &[ToolMeta] = &[
         // The editor page is bespoke; the generic options system isn't used.
         options: &[],
         icon: "✏️",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "merge-pdf",
@@ -176,6 +200,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 2,
         options: &[],
         icon: "🗂️",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "split-pdf",
@@ -187,6 +212,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[OptionKind::PageRange],
         icon: "✂️",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "rotate-pdf",
@@ -198,6 +224,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[OptionKind::RotateAngle],
         icon: "🔄",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "compress-pdf",
@@ -209,6 +236,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[],
         icon: "🗜️",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "images-to-pdf",
@@ -220,6 +248,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[OptionKind::Quality],
         icon: "🖼️",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "watermark-pdf",
@@ -231,6 +260,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[OptionKind::WatermarkText],
         icon: "💧",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "reorder-pdf",
@@ -242,6 +272,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[OptionKind::PageOrder],
         icon: "🔀",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "page-numbers-pdf",
@@ -253,6 +284,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[],
         icon: "🔢",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "crop-pdf",
@@ -264,6 +296,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[OptionKind::Margins],
         icon: "✂️",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "extract-text-pdf",
@@ -275,6 +308,26 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[],
         icon: "📝",
+        pipeline: ToolPipeline::Engine,
+    },
+    ToolMeta {
+        slug: "pdf-to-images",
+        name: "PDF to Image",
+        tagline: "Every page as a PNG, JPG or WebP",
+        category: ToolCategory::Pdf,
+        accept: ".pdf",
+        multi: false,
+        min_files: 1,
+        options: &[
+            OptionKind::RasterFormat,
+            OptionKind::RenderScale,
+            OptionKind::Quality,
+            OptionKind::PageRange,
+        ],
+        icon: "🖼️",
+        // Rasterization has no pure-Rust path — the browser renders the
+        // pages and the engine zips them (ADR-0009).
+        pipeline: ToolPipeline::BrowserRender,
     },
     ToolMeta {
         slug: "repair-pdf",
@@ -286,6 +339,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[],
         icon: "🩹",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "protect-pdf",
@@ -297,6 +351,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[OptionKind::Password],
         icon: "🛡️",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "unlock-pdf",
@@ -308,6 +363,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[OptionKind::Password],
         icon: "🔑",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "convert-img",
@@ -323,6 +379,7 @@ pub const TOOLS: &[ToolMeta] = &[
             OptionKind::ResolutionPercent,
         ],
         icon: "🔁",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "resize-img",
@@ -334,6 +391,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[OptionKind::Dimensions],
         icon: "📐",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "compress-img",
@@ -345,6 +403,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[OptionKind::Quality, OptionKind::ResolutionPercent],
         icon: "🪶",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "rotate-img",
@@ -356,6 +415,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[OptionKind::RotateAngle],
         icon: "🔃",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "flip-img",
@@ -367,6 +427,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[OptionKind::FlipDir],
         icon: "🪞",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "upscale-img",
@@ -378,6 +439,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[OptionKind::ScaleFactor, OptionKind::Quality],
         icon: "🔍",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "grayscale-img",
@@ -389,6 +451,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[OptionKind::Quality],
         icon: "🌗",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "blur-img",
@@ -400,6 +463,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[OptionKind::Strength],
         icon: "🌫️",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "watermark-img",
@@ -411,6 +475,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[OptionKind::WatermarkText, OptionKind::Quality],
         icon: "💦",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "strip-exif",
@@ -422,6 +487,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[OptionKind::Quality],
         icon: "🧽",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "crop-img",
@@ -433,6 +499,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[OptionKind::CropRect],
         icon: "🔲",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "favicon-pack",
@@ -444,6 +511,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[],
         icon: "🌐",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "rename-batch",
@@ -455,6 +523,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[OptionKind::NamePattern],
         icon: "🏷️",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "zip-files",
@@ -466,6 +535,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[],
         icon: "📦",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "unzip",
@@ -477,6 +547,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[],
         icon: "📂",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "encrypt-file",
@@ -488,6 +559,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[OptionKind::Password],
         icon: "🔐",
+        pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
         slug: "decrypt-file",
@@ -499,6 +571,7 @@ pub const TOOLS: &[ToolMeta] = &[
         min_files: 1,
         options: &[OptionKind::Password],
         icon: "🔓",
+        pipeline: ToolPipeline::Engine,
     },
 ];
 

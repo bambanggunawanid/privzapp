@@ -55,7 +55,7 @@ network — which is what makes the same code correct on wasm32 and native.
 
 | Category | Tools |
 |----------|-------|
-| PDF      | Edit PDF (sign by hand, handwriting brush, image stamps), Merge PDF, Split PDF (ranges or burst), Rotate PDF, Compress PDF, Images to PDF, Watermark PDF, Reorder PDF, Add Page Numbers, Crop PDF, PDF to Text, Repair PDF, Protect PDF (AES-256, opens anywhere), Unlock PDF |
+| PDF      | Edit PDF (sign by hand, handwriting brush, image stamps), Merge PDF, Split PDF (ranges or burst), Rotate PDF, Compress PDF, Images to PDF, Watermark PDF, Reorder PDF, Add Page Numbers, Crop PDF, PDF to Text, PDF to Image (PNG/JPG/WebP), Repair PDF, Protect PDF (AES-256, opens anywhere), Unlock PDF |
 | Image    | Convert Image (PNG/JPG/WebP/GIF/BMP/TIFF/ICO/QOI), Resize Image, Compress Image, Crop Image, Rotate Image, Flip Image, Upscale Image (2x/4x), Grayscale Image, Blur Image, Watermark Image, Strip Metadata (EXIF), Favicon Generator (full .zip pack), Batch Rename |
 | Compress | Create ZIP, Extract ZIP |
 | Protect  | Encrypt File / Decrypt File (AES-256-GCM `.pzv` vaults, PBKDF2 password keys) |
@@ -128,8 +128,7 @@ Details, designs and rationale live in [docs/ROADMAP.md](docs/ROADMAP.md).
 - [x] PWA manifest + service worker → installable, explicitly offline
 - [x] Drag-and-drop (folder drops still to come)
 - [x] PDF: reorder pages, images → PDF, watermark
-- [ ] PDF: page → image export (the editor's "Pages as PNG" ships today;
-      a standalone tool page waits on a wasm-safe rasterizer)
+- [x] PDF: page → image export ([design](docs/adr/0009-browser-rasterization.md))
 - [x] Image: batch rename, EXIF strip (privacy!), crop
 - [ ] Video/GIF tools via ffmpeg compiled to WASM ([design](docs/adr/0005-ffmpeg-wasm.md))
 - [x] Password-protect any file (AES-256 `.pzv` vaults via `pz-crypto`)

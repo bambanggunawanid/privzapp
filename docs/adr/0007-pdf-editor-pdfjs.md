@@ -2,6 +2,8 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-24
+- **Amended by**: [ADR-0009](0009-browser-rasterization.md) — rule 3 ("isolated in
+  the editor") now also allows a minimal render-only module on tool pages
 
 ## Context
 

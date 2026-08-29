@@ -4,7 +4,9 @@
 use dioxus::html::HasFileData;
 use dioxus::prelude::*;
 use pz_core::seo::seo_for;
-use pz_core::{human_size, tool_by_slug, InputFile, OptionKind, OutputFile, ToolOptions, TOOLS};
+use pz_core::{
+    human_size, tool_by_slug, InputFile, OptionKind, OutputFile, ToolOptions, ToolPipeline, TOOLS,
+};
 use pz_img::TARGET_FORMATS;
 
 use crate::save::save_file;
@@ -221,7 +223,16 @@ pub fn ToolPage(slug: String) -> Element {
         outputs.set(Vec::new());
         spawn(async move {
             let input = files.read().clone();
-            match crate::engine::run(meta.slug, input, &opts).await {
+            let result = match meta.pipeline {
+                ToolPipeline::Engine => crate::engine::run(meta.slug, input, &opts).await,
+                // Pages have to be rasterized by the browser before the
+                // engine can package them (ADR-0009).
+                ToolPipeline::BrowserRender => match input.first() {
+                    Some(file) => crate::render::pdf_to_images(file, &opts).await,
+                    None => Err("pick a PDF first".to_string()),
+                },
+            };
+            match result {
                 Ok(out) => outputs.set(out),
                 Err(e) => error.set(e),
             }
@@ -236,6 +247,11 @@ pub fn ToolPage(slug: String) -> Element {
         if let Some(seo) = seo {
             document::Title { "{seo.title}" }
             document::Meta { name: "description", content: seo.description }
+        }
+        // Only the tools that rasterize pull in the page renderer (and,
+        // through it, PDF.js) — every other tool stays wasm-only.
+        if meta.pipeline == ToolPipeline::BrowserRender {
+            document::Script { src: crate::render::PDFRENDER_JS }
         }
         section { class: "tool-head",
             if let Some(src) = crate::icons::tool_icon(meta.slug) {
@@ -644,6 +660,32 @@ pub fn ToolPage(slug: String) -> Element {
                                         },
                                         option { value: "2", "2× (double size)" }
                                         option { value: "4", "4× (quadruple size)" }
+                                    }
+                                }
+                            },
+                            OptionKind::RasterFormat => rsx! {
+                                div { class: "opt",
+                                    label { "Image format" }
+                                    select {
+                                        aria_label: "Image format",
+                                        value: "{format}",
+                                        onchange: move |evt| format.set(evt.value()),
+                                        option { value: "png", selected: format() == "png", "PNG (sharp text, lossless)" }
+                                        option { value: "jpg", selected: format() == "jpg", "JPG (smallest, photos)" }
+                                        option { value: "webp", selected: format() == "webp", "WebP (modern, small)" }
+                                    }
+                                }
+                            },
+                            OptionKind::RenderScale => rsx! {
+                                div { class: "opt",
+                                    label { "Resolution" }
+                                    select {
+                                        aria_label: "Resolution",
+                                        onchange: move |evt| scale.set(evt.value().parse().unwrap_or(2)),
+                                        option { value: "1", selected: scale() == 1, "1× — 72 DPI (screen preview)" }
+                                        option { value: "2", selected: scale() == 2, "2× — 144 DPI (default)" }
+                                        option { value: "3", selected: scale() == 3, "3× — 216 DPI" }
+                                        option { value: "4", selected: scale() == 4, "4× — 288 DPI (print/OCR)" }
                                     }
                                 }
                             },

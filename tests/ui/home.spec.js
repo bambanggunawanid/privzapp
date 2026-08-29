@@ -16,14 +16,20 @@ test.describe("home + nav", () => {
     await expect(page.locator(".tool-section")).toHaveCount(4);
   });
 
-  test("every tool card shows its SVG tile icon", async ({ page }) => {
-    // All 31 tools have a custom SVG (self-tiled, so no category-tint
-    // class), and the srcs survive dx asset hashing. The emoji tile is
-    // the fallback for a tool added without an icon — none left today.
+  test("tool cards show their SVG tile icon, or fall back to the emoji", async ({ page }) => {
+    // 31 of the 32 tools have a custom SVG (self-tiled, so no
+    // category-tint class) and the srcs survive dx asset hashing. PDF to
+    // Image has no art yet and exercises the emoji fallback — the whole
+    // point of it, so pin that rather than pretending the set is full.
     const cards = await page.locator(".tool-card").count();
-    expect(cards).toBe(31);
+    expect(cards).toBe(32);
     await expect(page.locator("img.tool-tile-svg")).toHaveCount(31);
-    await expect(page.locator("span.tool-tile")).toHaveCount(0);
+    const emoji = page.locator("span.tool-tile");
+    await expect(emoji).toHaveCount(1);
+    await expect(
+      page.locator(".tool-card", { has: page.locator("h3", { hasText: "PDF to Image" }) })
+        .locator("span.tool-tile"),
+    ).toBeVisible();
     for (const [name, slug] of [
       ["Merge PDF", "merge-pdf"],
       ["Strip Metadata", "strip-exif"],
@@ -72,12 +78,15 @@ test.describe("home + nav", () => {
         els.map((e) => e.getAttribute("src")),
       );
       expect(srcs.length).toBeGreaterThan(0);
+      // Cards without art use the emoji tile and have no SVG to check.
       for (const src of srcs) {
         const svg = await (await page.request.get(src)).text();
         expect(svg, `${src} should carry the ${group} tile`).toContain(TILE[group]);
         checked++;
       }
     }
+    // Every icon that exists is checked; the emoji-fallback card has none.
+    expect(checked).toBe(await page.locator("img.tool-tile-svg").count());
     expect(checked).toBe(31);
   });
 

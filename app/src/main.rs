@@ -7,6 +7,7 @@
 mod engine;
 mod icons;
 mod pages;
+mod render;
 mod save;
 
 use dioxus::prelude::*;

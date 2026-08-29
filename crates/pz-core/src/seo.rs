@@ -233,6 +233,29 @@ pub const TOOL_SEO: &[ToolSeo] = &[
         ],
     },
     ToolSeo {
+        slug: "pdf-to-images",
+        title: "PDF to JPG — Convert PDF Pages to Images | PrivZapp",
+        description: "Convert PDF pages to JPG, PNG or WebP images free in your browser. Choose the resolution and page range. Your PDF is never uploaded to a server.",
+        faq: &[
+            (
+                "How do I convert a PDF to JPG?",
+                "Drop the PDF in, pick JPG as the format and a render scale, then run it. Every page comes back as its own image — one page downloads as a single file, several arrive as a .zip.",
+            ),
+            (
+                "What resolution will the images be?",
+                "1x renders at the PDF's natural 72 DPI; 2x, 3x and 4x multiply that (2x = 144 DPI, 4x = 288 DPI). Higher scales give sharper images and bigger files — 2x suits screens, 3x-4x suits print or OCR.",
+            ),
+            (
+                "Can I convert only some pages?",
+                "Yes. Leave the page box empty to convert the whole document, or type a range like 1-3,5 to pick exactly the pages you want.",
+            ),
+            (
+                "Is my PDF uploaded to convert it?",
+                "No. The pages are rendered by your own browser and the images are packaged on your device — the file never leaves it, and the tool keeps working offline.",
+            ),
+        ],
+    },
+    ToolSeo {
         slug: "repair-pdf",
         title: "Repair PDF — Fix a Corrupt PDF Online Free | PrivZapp",
         description: "Try to repair a damaged PDF by rebuilding its structure and cross-reference table — free, on your device, with nothing uploaded.",
