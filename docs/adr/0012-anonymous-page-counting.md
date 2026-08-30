@@ -70,3 +70,14 @@ matching the owner's stated privacy promise could be written for it.
   "unique visitor" numbers. That is the trade the disclosure sells.
 - Native (desktop/mobile) builds send nothing — the beacon compiles to
   a no-op off wasm32/web.
+- Operational: nginx resolves the sidecar hostname once at startup, so
+  recreating only the analytics container makes beacons 504 until the
+  web container restarts. Harmless for visitors (fire-and-forget), but
+  it silently stops counting — restart both, which `docker compose up
+  -d` does anyway.
+- The `collect` bitmask is version-sensitive: these are `iota` bitflags
+  in GoatCounter's `settings.go` (v2.7.0: Location=16, Region=32,
+  Session=128), and the first cut of this ADR shipped `32` — the
+  sub-country *region* bit — which both broke counting and contradicted
+  the disclosure. Re-verify the constants against the source on every
+  upgrade; the entrypoint comment lists them.

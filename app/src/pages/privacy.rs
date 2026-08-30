@@ -56,6 +56,13 @@ pub fn Privacy() -> Element {
                 li { "No cookies, no localStorage IDs, no fingerprinting, no session or visitor IDs — we cannot tell two of your visits apart, and we cannot count \"unique visitors\" at all. That is deliberate." }
                 li { "No screen size, no language, no region within a country, no referrer." }
                 li { "Nothing is shared with, or readable by, any other company." }
+                li {
+                    "One honest footnote: requests our counter judges to be bots "
+                    "(crawlers, automated tools) are set aside with their browser "
+                    "identification string so they can be excluded from the counts. "
+                    "That list is wiped every time the counter restarts, and it holds "
+                    "automated traffic — not visits we count."
+                }
             }
             h3 { "Your switch" }
             ul {
