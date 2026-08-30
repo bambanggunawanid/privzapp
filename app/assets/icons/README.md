@@ -1,6 +1,6 @@
 # Tool tile icons
 
-One unique 64x64 SVG per tool — all 36 of them (15 PDF, 13 image, 2
+One unique 64x64 SVG per tool — all 38 of them (16 PDF, 14 image, 2
 archive, 2 security, 4 video). Gold/orange + electric-blue accents on a rounded
 tile, no external assets.
 

@@ -47,6 +47,13 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
   folder and one match arm in `app/src/icons.rs`.
 
 ### Added
+- **OCR — Image to Text and OCR PDF**: read the text out of pictures,
+  screenshots and scanned PDFs, entirely on-device (tesseract-wasm,
+  ADR-0011). English and Indonesian models; scanned PDFs are rendered
+  page by page (resolution and page-range options) and download as .txt
+  with page markers. Size was the design constraint: a 1.8 MB engine +
+  3.9 MB fast English model — ~4-5 MB once, only when first used, only
+  for the language picked — then cached for offline.
 - **Extract Audio** (36th tool): pull the soundtrack out of any video as
   MP3, WAV, OGG or M4A, with a quality slider and optional time range —
   all on-device via the bundled ffmpeg.wasm.

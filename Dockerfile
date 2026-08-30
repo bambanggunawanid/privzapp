@@ -42,6 +42,7 @@ RUN cd target/dx/privzapp/release/web/public \
     && find . -type f \( -name '*.wasm' -o -name '*.js' -o -name '*.mjs' \
          -o -name '*.css' -o -name '*.html' -o -name '*.json' \
          -o -name '*.svg' -o -name '*.webmanifest' -o -name '*.xml' \
+         -o -name '*.traineddata' \
          -o -name '*.txt' \) -exec gzip -9 -k {} +
 
 # ---- runtime stage --------------------------------------------------------

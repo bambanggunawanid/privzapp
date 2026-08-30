@@ -6,7 +6,7 @@ it: client-side only, wasm32-safe, free forever (see ADR-0001).
 
 ## Done
 
-- **36 tools** across PDF / Image / Compress / Protect / Video (see README
+- **38 tools** across PDF / Image / Compress / Protect / Video (see README
   table),
   covering most of the iLovePDF/iLoveIMG catalog that is feasible fully
   client-side — including standard AES-256 PDF password protection and
@@ -27,6 +27,11 @@ it: client-side only, wasm32-safe, free forever (see ADR-0001).
   still doesn't exist; this borrows the editor's renderer instead of
   waiting for one.
 - **Password vaults**: AES-256-GCM `.pzv` files (ADR-0003).
+- **OCR** (2026-08-30, ADR-0011): Image to Text and OCR PDF via
+  tesseract-wasm — 1.8 MB engine + tessdata_fast models (eng 3.9 MB,
+  ind 1.1 MB), per-language lazy fetch, pinned like ffmpeg. Scanned
+  PDFs ride the ADR-0009 rasterizer first. First-use cost ≈ 4-5 MB,
+  then cached offline.
 - **Video/GIF tools** (2026-08-30, ADR-0005 design + ADR-0010
   implementation): Video to GIF, lossless Trim, MP4 ↔ WebM conversion via
   the prebuilt ffmpeg.wasm — fetched pinned by sha256, served same-origin
@@ -51,8 +56,6 @@ path:
 - **PDF → JPG**: done (ADR-0009). What remains in this family is
   *thumbnail sheets* (contact-sheet style, several pages per image), which
   is a compositing job on top of the same render.
-- **OCR (scanned PDFs → text)**: tesseract-wasm exists (~15 MB); viable
-  later behind lazy loading, same isolation rules as ffmpeg.
 - **AI features (background removal, face blur, AI upscale)**: need ONNX
   models in the browser (~5-40 MB each); possible via ort-wasm/tract —
   evaluate after ffmpeg lands the "big lazy module" pattern.

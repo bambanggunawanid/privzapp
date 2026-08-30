@@ -53,9 +53,32 @@ await page.setInputFiles("#file-in", {
 await page.locator(".actions button.primary").click();
 await page.waitForSelector(".results", { timeout: 90_000 });
 
+// The OCR stack: ESM module import, its worker, and a worker-side fetch
+// of the model — all must clear script-src/worker-src/connect-src.
+await page.goto(`${base}/tool/image-to-text/`);
+await page.waitForSelector("#file-in", { state: "attached", timeout: 45_000 });
+const ocrPng = await page.evaluate(async () => {
+  const canvas = document.createElement("canvas");
+  canvas.width = 320; canvas.height = 80;
+  const c = canvas.getContext("2d");
+  c.fillStyle = "#fff"; c.fillRect(0, 0, 320, 80);
+  c.fillStyle = "#000"; c.font = "bold 40px sans-serif";
+  c.fillText("SMOKE 99", 20, 55);
+  const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
+  const fr = new FileReader();
+  return new Promise((r) => { fr.onload = () => r(fr.result.split(",", 2)[1]); fr.readAsDataURL(blob); });
+});
+await page.setInputFiles("#file-in", {
+  name: "smoke.png",
+  mimeType: "image/png",
+  buffer: Buffer.from(ocrPng, "base64"),
+});
+await page.locator(".actions button.primary").click();
+await page.waitForSelector(".results", { timeout: 90_000 });
+
 await browser.close();
 if (violations.length) {
   console.error("CSP smoke FAILED:\n" + violations.join("\n"));
   process.exit(1);
 }
-console.log("CSP smoke passed: wasm boot, engine preview, PDF.js and ffmpeg.wasm all fine under the deployed headers.");
+console.log("CSP smoke passed: wasm boot, engine preview, PDF.js, ffmpeg.wasm and tesseract-wasm all fine under the deployed headers.");

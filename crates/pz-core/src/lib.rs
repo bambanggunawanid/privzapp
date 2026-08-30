@@ -143,6 +143,8 @@ pub enum OptionKind {
     VideoFormat,
     /// Output format select for audio extraction (MP3/WAV/OGG/M4A).
     AudioFormat,
+    /// Recognition language select for the OCR tools.
+    OcrLanguage,
     /// Output frame rate select for GIF conversion.
     Fps,
     /// Optional start/end timecodes ("90", "1:30" or "1:30:05.5").
@@ -169,6 +171,9 @@ pub enum ToolPipeline {
     /// The bundled ffmpeg.wasm does the work in a Web Worker (ADR-0010).
     /// Same rule: browser only, and `pz_engine::run` refuses the slug.
     BrowserFfmpeg,
+    /// The bundled tesseract-wasm recognizes text in a Web Worker
+    /// (ADR-0011); scanned PDFs are rasterized first via ADR-0009.
+    BrowserOcr,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -341,6 +346,24 @@ pub const TOOLS: &[ToolMeta] = &[
         // Rasterization has no pure-Rust path — the browser renders the
         // pages and the engine zips them (ADR-0009).
         pipeline: ToolPipeline::BrowserRender,
+    },
+    ToolMeta {
+        slug: "ocr-pdf",
+        name: "OCR PDF",
+        tagline: "Read the text out of a scanned PDF",
+        category: ToolCategory::Pdf,
+        accept: ".pdf",
+        multi: false,
+        min_files: 1,
+        options: &[
+            OptionKind::OcrLanguage,
+            OptionKind::RenderScale,
+            OptionKind::PageRange,
+        ],
+        icon: "🔎",
+        // Rasterized by the browser (ADR-0009), recognized by
+        // tesseract-wasm (ADR-0011) — no headless path exists.
+        pipeline: ToolPipeline::BrowserOcr,
     },
     ToolMeta {
         slug: "repair-pdf",
@@ -527,6 +550,18 @@ pub const TOOLS: &[ToolMeta] = &[
         pipeline: ToolPipeline::Engine,
     },
     ToolMeta {
+        slug: "image-to-text",
+        name: "Image to Text",
+        tagline: "OCR — copy the text out of any picture",
+        category: ToolCategory::Image,
+        accept: "image/*",
+        multi: true,
+        min_files: 1,
+        options: &[OptionKind::OcrLanguage],
+        icon: "🔤",
+        pipeline: ToolPipeline::BrowserOcr,
+    },
+    ToolMeta {
         slug: "rename-batch",
         name: "Batch Rename",
         tagline: "Rename many files with one pattern",
@@ -679,6 +714,8 @@ pub struct ToolOptions {
     /// Optional clip start/end timecodes (empty = start/end of the video).
     pub trim_start: String,
     pub trim_end: String,
+    /// OCR recognition language (ISO 639-2 code, e.g. "eng").
+    pub lang: String,
 }
 
 impl Default for ToolOptions {
@@ -699,6 +736,7 @@ impl Default for ToolOptions {
             fps: 12,
             trim_start: String::new(),
             trim_end: String::new(),
+            lang: "eng".to_string(),
         }
     }
 }

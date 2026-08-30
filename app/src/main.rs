@@ -6,6 +6,7 @@
 
 mod engine;
 mod icons;
+mod ocr;
 mod pages;
 mod render;
 mod save;

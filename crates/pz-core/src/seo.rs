@@ -715,6 +715,48 @@ pub const TOOL_SEO: &[ToolSeo] = &[
             ),
         ],
     },
+    ToolSeo {
+        slug: "ocr-pdf",
+        title: "OCR PDF Free — Scanned PDF to Text | PrivZapp",
+        description: "Read the text out of a scanned PDF free in your browser with on-device OCR. Pick the language and page range — the document is never uploaded.",
+        faq: &[
+            (
+                "How do I get text out of a scanned PDF?",
+                "Drop the PDF in, pick the language, and run it. Each page is rendered and recognized on your device, and the result downloads as a plain .txt file with page markers.",
+            ),
+            (
+                "How is this different from PDF to Text?",
+                "PDF to Text pulls out text the PDF already carries digitally — instant and exact, but useless for scans. OCR PDF actually reads the page image, so photographed and scanned documents work too.",
+            ),
+            (
+                "How accurate is it, and can I improve it?",
+                "Clean scans read very well. For faint or small print, raise the resolution option — recognition happens at the rendered size, so 3x-4x gives the engine more pixels to work with.",
+            ),
+            (
+                "Is my document uploaded for OCR?",
+                "No. The recognition engine (a few MB, downloaded once and cached) runs inside your browser tab. Pages, pixels and text never leave your device.",
+            ),
+        ],
+    },
+    ToolSeo {
+        slug: "image-to-text",
+        title: "Image to Text — Free OCR in Your Browser | PrivZapp",
+        description: "Copy the text out of any picture — photos, screenshots, scans — with free on-device OCR. Nothing is uploaded; the recognition runs in your browser.",
+        faq: &[
+            (
+                "How do I extract text from a picture?",
+                "Drop one or more images in, pick the language, and run it. Each image comes back as its own .txt file with the recognized text in reading order.",
+            ),
+            (
+                "What kind of images work best?",
+                "Sharp, well-lit text on a plain background. Screenshots read almost perfectly; for photos, crop close to the text (the Crop Image tool helps) and avoid skewed angles.",
+            ),
+            (
+                "Is my picture uploaded to read it?",
+                "No. The OCR engine is WebAssembly running in your own browser — a one-time download of a few MB, cached for offline use. Your images never leave the device.",
+            ),
+        ],
+    },
 ];
 
 /// SEO copy for a tool page.

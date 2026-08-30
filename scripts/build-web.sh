@@ -32,6 +32,12 @@ cp app/pwa/* "$OUT/"
 mkdir -p "$OUT/ffmpeg"
 cp app/ffmpeg/*.js app/ffmpeg/*.wasm app/ffmpeg/LICENSE.md "$OUT/ffmpeg/"
 
+# OCR runtime (ADR-0011): same unhashed-root treatment, same reason.
+./scripts/fetch-ocr.sh
+mkdir -p "$OUT/ocr/tessdata"
+cp app/ocr/*.js app/ocr/*.wasm app/ocr/LICENSE.md "$OUT/ocr/"
+cp app/ocr/tessdata/*.traineddata "$OUT/ocr/tessdata/"
+
 # Prerender SEO pages (per-tool HTML, sitemap, robots) from the registry.
 # BASE_URL must be the real production origin for canonicals to be valid.
 BASE_URL="${BASE_URL:-https://privzapp.com}" cargo run --quiet --release -p seo-gen -- "$OUT"

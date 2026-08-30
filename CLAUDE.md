@@ -140,6 +140,13 @@ crates that compile to both native and wasm32.
   purpose (the mt build needs cross-origin isolation, rejected in
   ADR-0004). Never "upgrade" it to a CDN load, and never add the COOP/COEP
   headers just to get threads.
+- OCR (ADR-0011) mirrors the ffmpeg setup exactly: `ToolPipeline::BrowserOcr`,
+  `app/src/ocr.rs` + `app/assets/ocrtool.js`, runtime fetched sha256-pinned
+  by `scripts/fetch-ocr.sh` into `app/ocr/` (gitignored), served unhashed
+  from `/ocr/`, 404s in `dx serve`. Language codes are an ALLOWLIST
+  (`safe_lang`) because they're spliced into a URL; adding a language =
+  fetch-script pin + allowlist arm + widget option. OCR PDF composes the
+  ADR-0009 renderer, so its page mounts pdfrender.js too.
 - The PDF editor (`app/src/pages/editor.rs` + `app/assets/editor.js`) is
   the one sanctioned JS-library exception: bundled PDF.js renders pages,
   Rust does ALL mutation (`pz_pdf::annotate`). Don't add other JS libs or

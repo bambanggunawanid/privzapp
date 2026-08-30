@@ -71,6 +71,7 @@ pub fn ToolPage(slug: String) -> Element {
     let mut trim_end = use_signal(String::new);
     let mut video_format = use_signal(|| "mp4".to_string());
     let mut audio_format = use_signal(|| "mp3".to_string());
+    let mut lang = use_signal(|| "eng".to_string());
 
     let meta = *meta;
 
@@ -281,6 +282,7 @@ pub fn ToolPage(slug: String) -> Element {
             fps: fps(),
             trim_start: trim_start(),
             trim_end: trim_end(),
+            lang: lang(),
         };
         busy.set(true);
         error.set(String::new());
@@ -301,6 +303,10 @@ pub fn ToolPage(slug: String) -> Element {
                     Some(file) => crate::video::run_video_tool(file, meta.slug, &opts).await,
                     None => Err("pick a video first".to_string()),
                 },
+                // Text recognition through tesseract-wasm (ADR-0011).
+                ToolPipeline::BrowserOcr => {
+                    crate::ocr::run_ocr_tool(&input, meta.slug, &opts).await
+                }
             };
             match result {
                 Ok(out) => outputs.set(out),
@@ -325,6 +331,12 @@ pub fn ToolPage(slug: String) -> Element {
         }
         if meta.pipeline == ToolPipeline::BrowserFfmpeg {
             document::Script { src: crate::video::VIDEOTOOL_JS }
+        }
+        // OCR pages also mount the (tiny) page renderer: scanned PDFs are
+        // rasterized before recognition; PDF.js itself stays lazy.
+        if meta.pipeline == ToolPipeline::BrowserOcr {
+            document::Script { src: crate::ocr::OCRTOOL_JS }
+            document::Script { src: crate::render::PDFRENDER_JS }
         }
         if meta.multi && cfg!(target_arch = "wasm32") {
             document::Script { src: DROPDIR_JS }
@@ -793,6 +805,17 @@ pub fn ToolPage(slug: String) -> Element {
                                         option { value: "wav", selected: audio_format() == "wav", "WAV (uncompressed, lossless)" }
                                         option { value: "ogg", selected: audio_format() == "ogg", "OGG (Vorbis)" }
                                         option { value: "m4a", selected: audio_format() == "m4a", "M4A (AAC)" }
+                                    }
+                                }
+                            },
+                            OptionKind::OcrLanguage => rsx! {
+                                div { class: "opt",
+                                    label { "Language" }
+                                    select {
+                                        aria_label: "Recognition language",
+                                        onchange: move |evt| lang.set(evt.value()),
+                                        option { value: "eng", selected: lang() == "eng", "English" }
+                                        option { value: "ind", selected: lang() == "ind", "Indonesian (Bahasa)" }
                                     }
                                 }
                             },
