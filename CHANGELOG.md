@@ -7,7 +7,20 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-08-30
+
+First tagged release. Everything below shipped since 0.1.0: the PDF
+editor workspace, the video and OCR tool families, folder drag-and-drop,
+editor autosave — and, deliberately, no telemetry.
+
 ### Fixed
+- Release bundles no longer carry every previous build. `dx` never cleans
+  its output directory, so each build left another hashed copy of the
+  ~4 MB app wasm in `assets/` — 54 of them had accumulated, and
+  `scripts/build-web.sh` was shipping all of it into the container. The
+  script now wipes the output directory first: **248 MB → 47 MB**. (It
+  also removes the stale-bundle trap that once booted an old wasm in the
+  engine Web Worker, ADR-0004.)
 - Mobile nav: the "All tools" and "Support us" labels wrapped to a second
   line and spilled out of the fixed-height bar on phones. Below 700px
   every nav chip is now icon-only (a grid glyph, the GitHub mark, a

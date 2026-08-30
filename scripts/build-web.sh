@@ -13,6 +13,16 @@ if [[ -f .env ]]; then
   set +a
 fi
 
+# dx does NOT clean its output directory: every build drops another
+# hashed copy of the ~4 MB app wasm (and its .gz sibling) into assets/
+# and leaves the old ones. Left alone that reached 54 stale binaries and
+# a 248 MB bundle in one working session — all of which would ship
+# inside the container image. The directory is pure build output, so
+# wiping it before each release build is safe and keeps the bundle
+# honest. (It also removes the stale-bundle trap behind the Web Worker
+# gotcha in ADR-0004.)
+rm -rf "target/dx/privzapp/release/web"
+
 (cd app && dx build --platform web --release)
 
 # dx emits the static site under target/dx/<app>/release/web/public.

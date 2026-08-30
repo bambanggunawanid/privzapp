@@ -71,6 +71,10 @@ crates that compile to both native and wasm32.
 - Wasm check alone (the important one):
   `cargo check -p privzapp --target wasm32-unknown-unknown`
 - Dev server: `cd app && dx serve --platform web`
+- `scripts/build-web.sh` wipes `target/dx/privzapp/release/web` before
+  building on purpose: dx leaves a hashed copy of the ~4 MB app wasm per
+  build and never prunes, which bloated the bundle to 248 MB (and is the
+  stale-bundle hazard behind the ADR-0004 worker gotcha). Don't remove it.
 - Release bundle incl. PWA files: `./scripts/build-web.sh`
   (output: `target/dx/privzapp/release/web/public/`)
 - Icons/branding: `python3 scripts/gen-icons.py` regenerates every icon

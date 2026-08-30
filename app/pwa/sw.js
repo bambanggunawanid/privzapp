@@ -8,7 +8,7 @@
 // This file must be served from the origin root so its scope covers "/".
 // scripts/build-web.sh copies it (and the manifest/icons) into the bundle.
 
-const CACHE = 'privzapp-v1';
+const CACHE = 'privzapp-v1.0.0';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();

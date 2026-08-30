@@ -4083,7 +4083,7 @@ checksum = "925383efa346730478fb4838dbe9137d2a47675ad789c546d150a6e1dd4ab31c"
 
 [[package]]
 name = "privzapp"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "base64",
  "dioxus",
@@ -4247,7 +4247,7 @@ checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
 
 [[package]]
 name = "pz-archive"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "pz-core",
  "zip",
@@ -4255,11 +4255,11 @@ dependencies = [
 
 [[package]]
 name = "pz-core"
-version = "0.1.0"
+version = "1.0.0"
 
 [[package]]
 name = "pz-crypto"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "aes-gcm",
  "getrandom 0.2.17",
@@ -4269,7 +4269,7 @@ dependencies = [
 
 [[package]]
 name = "pz-engine"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "image",
  "pz-archive",
@@ -4281,7 +4281,7 @@ dependencies = [
 
 [[package]]
 name = "pz-img"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "ab_glyph",
  "color_quant",
@@ -4291,7 +4291,7 @@ dependencies = [
 
 [[package]]
 name = "pz-pdf"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "image",
  "lopdf",
@@ -4917,7 +4917,7 @@ dependencies = [
 
 [[package]]
 name = "seo-gen"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "pz-core",
  "serde_json",
