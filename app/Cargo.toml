@@ -16,6 +16,9 @@ base64 = "0.22"
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 wasm-bindgen = "0.2"
+# Folder drops (app/src/pages/tool.rs): await the browser fetch of each
+# dropped file's blob: URL.
+wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 # Engine worker round-trips (app/src/engine.rs) await a oneshot per job.
 futures-channel = "0.3"
@@ -32,6 +35,7 @@ web-sys = { version = "0.3", features = [
     "WorkerType",
     "DedicatedWorkerGlobalScope",
     "MessageEvent",
+    "Response",
     "console",
 ] }
 

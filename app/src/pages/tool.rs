@@ -1,6 +1,7 @@
 //! The generic tool page: pick files → tweak options → run → download.
 //! One component serves every tool; the registry says which options to show.
 
+use dioxus::document::eval;
 use dioxus::html::HasFileData;
 use dioxus::prelude::*;
 use pz_core::seo::seo_for;
@@ -11,6 +12,8 @@ use pz_img::TARGET_FORMATS;
 
 use crate::save::save_file;
 use crate::Route;
+
+const DROPDIR_JS: Asset = asset!("/assets/dropdir.js");
 
 /// Browser-displayable image MIME by file extension — used for upload
 /// thumbnails so users can see what actually got picked.
@@ -207,6 +210,52 @@ pub fn ToolPage(slug: String) -> Element {
         });
     };
 
+    // Folder drops (multi-file tools, web/webview): dropdir.js intercepts a
+    // directory drop, walks it, and queues [{name, url}] lists; this loop
+    // fetches each blob: URL into the same file list the picker feeds.
+    use_future(move || async move {
+        // wasm only: on desktop/mobile the native fetch stub can't read
+        // blob URLs, so the listener must never attach there — folder
+        // drops keep their current (inert) native behavior.
+        if !meta.multi || !cfg!(target_arch = "wasm32") {
+            return;
+        }
+        #[derive(serde::Deserialize)]
+        struct Dropped {
+            name: String,
+            url: String,
+        }
+        // The generation counter retires the previous page's loop: dropping
+        // the Eval handle does not cancel its JS, and a batch resolved into
+        // a dead loop would vanish (and leak its blob URLs). A stale loop
+        // re-queues the batch for the live one and exits instead.
+        let mut bridge = eval(
+            "for (let i = 0; i < 100 && typeof pzDropInit === 'undefined'; i++) { await new Promise(r => setTimeout(r, 50)); } \
+             if (typeof pzDropInit === 'undefined') return; \
+             pzDropInit(); \
+             const D = window.pzDropState; \
+             const myGen = (D.gen = (D.gen || 0) + 1); \
+             while (true) { \
+               const batch = await pzNextDrop(); \
+               if (D.gen !== myGen) { D.queue.unshift(batch); return; } \
+               dioxus.send(batch); \
+             }",
+        );
+        while let Ok(batch) = bridge.recv::<Vec<Dropped>>().await {
+            for f in &batch {
+                match crate::save::fetch_bytes(&f.url).await {
+                    Ok(bytes) => add_file(f.name.clone(), bytes),
+                    Err(e) => error.set(format!("could not read {}: {e}", f.name)),
+                }
+                crate::save::revoke_object_url(&f.url);
+            }
+            if !batch.is_empty() {
+                clear_preview_cache();
+                refresh_preview();
+            }
+        }
+    });
+
     let run = move |_: Event<MouseData>| {
         let uses_video_format = meta.options.contains(&OptionKind::VideoFormat);
         let opts = ToolOptions {
@@ -274,6 +323,9 @@ pub fn ToolPage(slug: String) -> Element {
         if meta.pipeline == ToolPipeline::BrowserFfmpeg {
             document::Script { src: crate::video::VIDEOTOOL_JS }
         }
+        if meta.multi && cfg!(target_arch = "wasm32") {
+            document::Script { src: DROPDIR_JS }
+        }
         section { class: "tool-head",
             if let Some(src) = crate::icons::tool_icon(meta.slug) {
                 img { class: "tool-icon-svg big", src, alt: "" }
@@ -289,6 +341,10 @@ pub fn ToolPage(slug: String) -> Element {
         section { class: "panel",
             label {
                 class: if dragging() { "dropzone drag" } else { "dropzone" },
+                // Opt-in marker for dropdir.js: only dropzones carrying it
+                // get folder drops intercepted (single-file tools and the
+                // editor must stay untouched).
+                "data-dropdir": if meta.multi && cfg!(target_arch = "wasm32") { Some("1") } else { None },
                 r#for: "file-in",
                 ondragover: move |evt| {
                     evt.prevent_default();
@@ -314,7 +370,7 @@ pub fn ToolPage(slug: String) -> Element {
                 },
                 span { class: "dz-icon", "⬆" }
                 span { class: "dz-label",
-                    if meta.multi { "Drop files here or click to choose" }
+                    if meta.multi { "Drop files or a folder here — or click to choose" }
                     else { "Drop a file here or click to choose" }
                 }
                 span { class: "dz-hint", "Files stay on this device — always." }

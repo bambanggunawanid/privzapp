@@ -27,7 +27,7 @@ pub fn create(files: &[(String, Vec<u8>)]) -> Result<Vec<u8>, PzError> {
     let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
     let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
     for (name, bytes) in files {
-        let safe_name = sanitize(name);
+        let safe_name = sanitize_path(name);
         writer
             .start_file(safe_name, options)
             .map_err(|e| PzError::Failed(format!("could not add \"{name}\": {e}")))?;
@@ -96,7 +96,28 @@ pub fn extract(bytes: &[u8]) -> Result<Vec<OutputFile>, PzError> {
     Ok(outputs)
 }
 
+/// Neutralize a path for ARCHIVE ENTRY names while keeping its folder
+/// structure: forward slashes only, and every empty/`.`/`..`/drive-ish
+/// component dropped. Folder drops feed real relative paths ("photos/
+/// raw/img.png") into Create ZIP, and flattening them would collide
+/// same-named files from different subfolders.
+fn sanitize_path(name: &str) -> String {
+    let joined = name
+        .replace('\\', "/")
+        .split('/')
+        .filter(|s| !s.is_empty() && *s != "." && *s != ".." && !s.ends_with(':'))
+        .collect::<Vec<_>>()
+        .join("/");
+    if joined.is_empty() {
+        "file".to_string()
+    } else {
+        joined
+    }
+}
+
 /// Keep only the final path component and strip anything path-traversal-ish.
+/// Extraction stays maximally strict: entries become flat browser
+/// downloads, so structure is worthless there and hostile names aren't.
 fn sanitize(name: &str) -> String {
     name.replace('\\', "/")
         .split('/')
@@ -136,6 +157,23 @@ mod tests {
         assert_eq!(sanitize("dir/sub/file.txt"), "file.txt");
         assert_eq!(sanitize("windows\\path\\x.doc"), "x.doc");
         assert_eq!(sanitize("///"), "file");
+    }
+
+    #[test]
+    fn create_keeps_structure_but_never_escapes() {
+        assert_eq!(sanitize_path("photos/raw/img.png"), "photos/raw/img.png");
+        assert_eq!(sanitize_path("../../etc/passwd"), "etc/passwd");
+        assert_eq!(sanitize_path("/abs/path.txt"), "abs/path.txt");
+        assert_eq!(sanitize_path("a/./b.txt"), "a/b.txt");
+        assert_eq!(sanitize_path("C:\\evil\\x.doc"), "evil/x.doc");
+        assert_eq!(sanitize_path("../.."), "file");
+        let files = vec![
+            ("dir/sub/a.txt".to_string(), b"x".to_vec()),
+            ("dir/a.txt".to_string(), b"y".to_vec()),
+        ];
+        let archive = create(&files).unwrap();
+        // Extraction flattens by design; both survive as distinct entries.
+        assert_eq!(extract(&archive).unwrap().len(), 2);
     }
 
     #[test]

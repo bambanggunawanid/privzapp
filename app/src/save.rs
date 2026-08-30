@@ -89,3 +89,31 @@ pub fn save_file(file: &OutputFile) -> Result<Option<String>, String> {
     std::fs::write(&path, &file.bytes).map_err(|e| format!("could not save: {e}"))?;
     Ok(Some(path.display().to_string()))
 }
+
+/// Read the bytes behind a same-origin (blob:) URL — how folder-drop
+/// files cross from JS to Rust without base64ing megabytes through the
+/// eval channel.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_bytes(url: &str) -> Result<Vec<u8>, String> {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_futures::JsFuture;
+    // Structural, not conventional: this helper must never become a way
+    // to reach the network — file bytes live behind blob: URLs only.
+    if !url.starts_with("blob:") {
+        return Err("refusing to fetch a non-blob URL".to_string());
+    }
+    let window = web_sys::window().ok_or("no window")?;
+    let resp = JsFuture::from(window.fetch_with_str(url))
+        .await
+        .map_err(|e| format!("fetch failed: {e:?}"))?;
+    let resp: web_sys::Response = resp.dyn_into().map_err(|_| "not a Response")?;
+    let buf = JsFuture::from(resp.array_buffer().map_err(|e| format!("no body: {e:?}"))?)
+        .await
+        .map_err(|e| format!("read failed: {e:?}"))?;
+    Ok(js_sys::Uint8Array::new(&buf).to_vec())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_bytes(_url: &str) -> Result<Vec<u8>, String> {
+    Err("folder drops are handled natively on this platform".to_string())
+}

@@ -90,9 +90,12 @@ crates that compile to both native and wasm32.
 - Run the `privacy-reviewer` agent on telemetry/dependency/UI-copy changes
   and the `wasm-guard` agent on dependency/engine changes
   (`.claude/agents/`).
-- This container is headless: service-worker, drag-drop and download
+- This container is headless: service-worker and real drag-gesture
   behavior can't be verified here — flag what needs a manual browser pass
-  instead of claiming it works.
+  instead of claiming it works. (Folder-drop logic IS testable: the specs
+  call `pzIngestEntries` with duck-typed entry trees; only the physical
+  gesture isn't. `readEntries` returns ≤100 entries per call — the walker
+  must loop, and the test pins it.)
 
 ## Gotchas
 

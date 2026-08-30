@@ -127,7 +127,7 @@ Details, designs and rationale live in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 - [x] Web Workers so huge files never block the UI thread ([design](docs/adr/0004-web-worker-offloading.md))
 - [x] PWA manifest + service worker → installable, explicitly offline
-- [x] Drag-and-drop (folder drops still to come)
+- [x] Drag-and-drop, including whole folders
 - [x] PDF: reorder pages, images → PDF, watermark
 - [x] PDF: page → image export ([design](docs/adr/0009-browser-rasterization.md))
 - [x] Image: batch rename, EXIF strip (privacy!), crop

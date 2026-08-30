@@ -15,7 +15,12 @@ it: client-side only, wasm32-safe, free forever (see ADR-0001).
 - **PWA**: installable, offline-capable release bundle
   (`scripts/build-web.sh` puts manifest/service-worker/icons at the site
   root; cache-first is safe because dx fingerprints assets).
-- **Drag-and-drop** onto the tool page dropzone.
+- **Drag-and-drop** onto the tool page dropzone — including folders
+  (2026-08-30): `app/assets/dropdir.js` walks `webkitGetAsEntry` trees in
+  the capture phase and a dioxus eval bridge feeds the same file list;
+  Create ZIP preserves the folder structure (traversal-neutralized).
+  Multi-file web tools only; the physical drag gesture itself still needs
+  a manual browser pass after changes.
 - **PDF page → image export** (2026-08-29): the PDF to Image tool renders
   pages with the bundled PDF.js and packages them in the engine — PNG/JPG/
   WebP, 1x-4x, optional page range (ADR-0009). Pure-Rust rasterization
@@ -32,13 +37,6 @@ it: client-side only, wasm32-safe, free forever (see ADR-0001).
   runs off the main thread in the built bundle, transferable
   `ArrayBuffer`s avoid copies, and the UI falls back to inline execution
   where workers are unavailable — big files no longer freeze the tab.
-
-## Approved, designed, not yet built
-
-### Folder support for drag-and-drop
-Dropping a directory needs `webkitGetAsEntry` recursion (JS interop beyond
-what Dioxus events expose today). Plan: small `wasm-bindgen` helper walking
-`DataTransferItem` entries, feeding the same `InputFile` list.
 
 ## iLove-parity gaps and why they're blocked
 

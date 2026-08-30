@@ -47,6 +47,12 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
   folder and one match arm in `app/src/icons.rs`.
 
 ### Added
+- **Folder drag-and-drop**: dropping a directory on a multi-file tool now
+  walks its whole tree (subfolders included, OS clutter like `.DS_Store`
+  skipped) into the file list, and **Create ZIP preserves the folder
+  structure** inside the archive — relative paths are kept, traversal
+  tricks (`../`, absolute, drive letters) are neutralized. Plain file
+  drops behave as before; single-file tools are untouched.
 - **Video tools** — a fifth category, powered by FFmpeg compiled to
   WebAssembly (ADR-0005 design, ADR-0010 implementation), fetched
   version- and sha256-pinned and served from this origin, never a CDN:
