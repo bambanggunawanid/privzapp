@@ -21,8 +21,8 @@ test.describe("home + nav", () => {
     // class), and the srcs survive dx asset hashing. The emoji tile is
     // the fallback for a tool added without an icon — none left today.
     const cards = await page.locator(".tool-card").count();
-    expect(cards).toBe(35);
-    await expect(page.locator("img.tool-tile-svg")).toHaveCount(35);
+    expect(cards).toBe(36);
+    await expect(page.locator("img.tool-tile-svg")).toHaveCount(36);
     await expect(page.locator("span.tool-tile")).toHaveCount(0);
     for (const [name, slug] of [
       ["Merge PDF", "merge-pdf"],
@@ -80,7 +80,7 @@ test.describe("home + nav", () => {
         checked++;
       }
     }
-    expect(checked).toBe(35);
+    expect(checked).toBe(36);
   });
 
   // Regression: on a phone the "All tools" and "Support us" labels wrapped

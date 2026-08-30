@@ -47,6 +47,12 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
   folder and one match arm in `app/src/icons.rs`.
 
 ### Added
+- **Extract Audio** (36th tool): pull the soundtrack out of any video as
+  MP3, WAV, OGG or M4A, with a quality slider and optional time range —
+  all on-device via the bundled ffmpeg.wasm.
+- **Convert Video learned more formats**: MKV, MOV and AVI join MP4 and
+  WebM as outputs, and animated GIFs now work as *input* — a GIF becomes
+  a real (far smaller) video.
 - **Folder drag-and-drop**: dropping a directory on a multi-file tool now
   walks its whole tree (subfolders included, OS clutter like `.DS_Store`
   skipped) into the file list, and **Create ZIP preserves the folder

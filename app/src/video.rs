@@ -27,7 +27,12 @@ fn video_mime(ext: &str) -> &'static str {
         "webm" => "video/webm",
         "mov" => "video/quicktime",
         "mkv" => "video/x-matroska",
+        "avi" => "video/x-msvideo",
         "gif" => "image/gif",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" => "audio/ogg",
+        "m4a" => "audio/mp4",
         _ => "application/octet-stream",
     }
 }
@@ -147,43 +152,80 @@ fn plan(slug: &str, in_name: &str, in_fs: &str, opts: &ToolOptions) -> Result<Pl
         }
         "convert-video" => {
             let q = u32::from(opts.quality.clamp(1, 100));
-            let (fmt, codec_args): (&str, Vec<String>) = if opts.format == "webm" {
-                let crf = 10 + (100 - q) * 25 / 100;
-                (
-                    "webm",
-                    vec![
-                        "-c:v".into(),
-                        "libvpx".into(),
-                        "-crf".into(),
-                        crf.to_string(),
-                        "-b:v".into(),
-                        "0".into(),
-                        "-c:a".into(),
-                        "libopus".into(),
-                    ],
-                )
-            } else {
-                let crf = 18 + (100 - q) * 14 / 100;
-                (
-                    "mp4",
-                    vec![
-                        "-c:v".into(),
-                        "libx264".into(),
-                        "-preset".into(),
-                        "veryfast".into(),
-                        "-crf".into(),
-                        crf.to_string(),
-                        "-pix_fmt".into(),
-                        "yuv420p".into(),
-                        // x264 requires even dimensions; phones love odd ones.
-                        "-vf".into(),
-                        "scale=trunc(iw/2)*2:trunc(ih/2)*2".into(),
+            // x264-based containers share the same video args.
+            let crf_x264 = (18 + (100 - q) * 14 / 100).to_string();
+            let x264: Vec<String> = [
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                &crf_x264,
+                "-pix_fmt",
+                "yuv420p",
+                // x264 requires even dimensions; phones love odd ones.
+                "-vf",
+                "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+            ]
+            .map(String::from)
+            .to_vec();
+            let (fmt, codec_args): (&str, Vec<String>) = match opts.format.as_str() {
+                "webm" => {
+                    let crf = 10 + (100 - q) * 25 / 100;
+                    (
+                        "webm",
+                        vec![
+                            "-c:v".into(),
+                            "libvpx".into(),
+                            "-crf".into(),
+                            crf.to_string(),
+                            "-b:v".into(),
+                            "0".into(),
+                            "-c:a".into(),
+                            "libopus".into(),
+                        ],
+                    )
+                }
+                "mkv" => {
+                    let mut a = x264;
+                    a.extend(["-c:a".into(), "aac".into()]);
+                    ("mkv", a)
+                }
+                "mov" => {
+                    let mut a = x264;
+                    a.extend([
                         "-movflags".into(),
                         "+faststart".into(),
                         "-c:a".into(),
                         "aac".into(),
-                    ],
-                )
+                    ]);
+                    ("mov", a)
+                }
+                // Legacy compatibility container: MPEG-4 part 2 + MP3.
+                "avi" => {
+                    let qv = 2 + (100 - q) * 13 / 100;
+                    (
+                        "avi",
+                        vec![
+                            "-c:v".into(),
+                            "mpeg4".into(),
+                            "-q:v".into(),
+                            qv.to_string(),
+                            "-c:a".into(),
+                            "libmp3lame".into(),
+                        ],
+                    )
+                }
+                _ => {
+                    let mut a = x264;
+                    a.extend([
+                        "-movflags".into(),
+                        "+faststart".into(),
+                        "-c:a".into(),
+                        "aac".into(),
+                    ]);
+                    ("mp4", a)
+                }
             };
             let out_fs = format!("out.{fmt}");
             let mut args = vec!["-y".to_string(), "-i".into(), in_fs.into()];
@@ -198,6 +240,62 @@ fn plan(slug: &str, in_name: &str, in_fs: &str, opts: &ToolOptions) -> Result<Pl
                 arg_sets: vec![args],
                 out_fs,
                 out_name,
+                scratch: vec![],
+            })
+        }
+        "extract-audio" => {
+            let q = u32::from(opts.quality.clamp(1, 100));
+            if let Some(e) = end {
+                input.extend(["-to".into(), format!("{e}")]);
+            }
+            let (fmt, codec_args): (&str, Vec<String>) = match opts.format.as_str() {
+                // Lossless; the quality slider has nothing to control.
+                "wav" => ("wav", vec!["-c:a".into(), "pcm_s16le".into()]),
+                "ogg" => {
+                    // libvorbis -q:a runs 0..10.
+                    let qv = q / 10;
+                    (
+                        "ogg",
+                        vec![
+                            "-c:a".into(),
+                            "libvorbis".into(),
+                            "-q:a".into(),
+                            qv.to_string(),
+                        ],
+                    )
+                }
+                "m4a" => (
+                    "m4a",
+                    vec![
+                        "-c:a".into(),
+                        "aac".into(),
+                        "-b:a".into(),
+                        format!("{}k", 64 + q),
+                    ],
+                ),
+                _ => {
+                    // LAME VBR -q:a runs 9 (worst) .. 0 (best).
+                    let qa = (100 - q) * 9 / 100;
+                    (
+                        "mp3",
+                        vec![
+                            "-c:a".into(),
+                            "libmp3lame".into(),
+                            "-q:a".into(),
+                            qa.to_string(),
+                        ],
+                    )
+                }
+            };
+            let out_fs = format!("out.{fmt}");
+            let mut args = input;
+            args.extend(["-i".into(), in_fs.into(), "-vn".into()]);
+            args.extend(codec_args);
+            args.push(out_fs.clone());
+            Ok(Plan {
+                arg_sets: vec![args],
+                out_fs,
+                out_name: format!("{base}.{fmt}"),
                 scratch: vec![],
             })
         }

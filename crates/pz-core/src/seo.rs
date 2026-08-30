@@ -679,12 +679,12 @@ pub const TOOL_SEO: &[ToolSeo] = &[
     },
     ToolSeo {
         slug: "convert-video",
-        title: "Convert Video — MP4 to WebM & Back | PrivZapp",
-        description: "Convert videos between MP4 (H.264) and WebM free in your browser with a quality slider. Files are never uploaded — FFmpeg runs on your own device.",
+        title: "Convert Video — MP4, WebM, MKV, MOV, AVI | PrivZapp",
+        description: "Convert videos between MP4, WebM, MKV, MOV and AVI free in your browser, with a quality slider. GIFs convert to video too. Nothing is ever uploaded.",
         faq: &[
             (
-                "How do I convert a video to MP4 or WebM?",
-                "Drop the video in, pick the target format and a quality level, and run it. Audio is converted along with the picture (AAC for MP4, Opus for WebM).",
+                "Which formats can I convert between?",
+                "Any video your browser can hand over — MP4, WebM, MKV, MOV, AVI and more — to MP4 (H.264 + AAC), WebM (VP8 + Opus), MKV, MOV or AVI. Animated GIFs work as input too, so a GIF becomes a real, much smaller video.",
             ),
             (
                 "Why does converting take a while?",
@@ -693,6 +693,25 @@ pub const TOOL_SEO: &[ToolSeo] = &[
             (
                 "Which format should I pick?",
                 "MP4 (H.264) plays everywhere, including older devices. WebM is royalty-free and often smaller at the same quality, and every modern browser plays it.",
+            ),
+        ],
+    },
+    ToolSeo {
+        slug: "extract-audio",
+        title: "Extract Audio from Video — MP3, WAV | PrivZapp",
+        description: "Pull the audio track out of any video free in your browser, as MP3, WAV, OGG or M4A. The video is never uploaded — FFmpeg runs on your own device.",
+        faq: &[
+            (
+                "How do I get the audio out of a video?",
+                "Drop the video in, pick MP3, WAV, OGG or M4A, and run it. You can set start and end times to grab just one section, and the quality slider controls the bitrate for the lossy formats.",
+            ),
+            (
+                "Which format should I choose?",
+                "MP3 plays everywhere and is the safe default. WAV is uncompressed (biggest, lossless), OGG is the free-software choice, and M4A (AAC) is what Apple devices prefer.",
+            ),
+            (
+                "Is my video uploaded to extract the audio?",
+                "No. FFmpeg runs inside your browser tab (a one-time ~10 MB download, cached for offline use) — the video and its soundtrack never leave your device.",
             ),
         ],
     },

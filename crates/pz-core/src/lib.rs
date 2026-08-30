@@ -139,8 +139,10 @@ pub enum OptionKind {
     Strength,
     /// Output format select for PDF page rasterization (PNG/JPG/WebP).
     RasterFormat,
-    /// Output container select for video conversion (MP4/WebM).
+    /// Output container select for video conversion (MP4/WebM/MKV/MOV/AVI).
     VideoFormat,
+    /// Output format select for audio extraction (MP3/WAV/OGG/M4A).
+    AudioFormat,
     /// Output frame rate select for GIF conversion.
     Fps,
     /// Optional start/end timecodes ("90", "1:30" or "1:30:05.5").
@@ -615,13 +617,30 @@ pub const TOOLS: &[ToolMeta] = &[
     ToolMeta {
         slug: "convert-video",
         name: "Convert Video",
-        tagline: "MP4 ↔ WebM, right in your browser",
+        tagline: "MP4, WebM, MKV, MOV, AVI — GIFs in too",
         category: ToolCategory::Video,
-        accept: "video/*",
+        // .gif on purpose: an animated GIF is a fine video INPUT.
+        accept: "video/*,.gif",
         multi: false,
         min_files: 1,
         options: &[OptionKind::VideoFormat, OptionKind::Quality],
         icon: "🎬",
+        pipeline: ToolPipeline::BrowserFfmpeg,
+    },
+    ToolMeta {
+        slug: "extract-audio",
+        name: "Extract Audio",
+        tagline: "Pull the soundtrack out as MP3, WAV, OGG or M4A",
+        category: ToolCategory::Video,
+        accept: "video/*",
+        multi: false,
+        min_files: 1,
+        options: &[
+            OptionKind::AudioFormat,
+            OptionKind::Quality,
+            OptionKind::TimeRange,
+        ],
+        icon: "🎵",
         pipeline: ToolPipeline::BrowserFfmpeg,
     },
 ];

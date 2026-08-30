@@ -1,7 +1,7 @@
 # Tool tile icons
 
-One unique 64x64 SVG per tool — all 35 of them (15 PDF, 13 image, 2
-archive, 2 security, 3 video). Gold/orange + electric-blue accents on a rounded
+One unique 64x64 SVG per tool — all 36 of them (15 PDF, 13 image, 2
+archive, 2 security, 4 video). Gold/orange + electric-blue accents on a rounded
 tile, no external assets.
 
 The tile gradient is the tool's **category** colour, hue-matched to the

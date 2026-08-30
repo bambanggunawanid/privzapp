@@ -44,6 +44,7 @@ pub fn tool_icon(slug: &str) -> Option<Asset> {
         "video-to-gif" => asset!("/assets/icons/video-to-gif.svg"),
         "trim-video" => asset!("/assets/icons/trim-video.svg"),
         "convert-video" => asset!("/assets/icons/convert-video.svg"),
+        "extract-audio" => asset!("/assets/icons/extract-audio.svg"),
         _ => return None,
     })
 }

@@ -7,6 +7,8 @@ import { test, expect } from "@playwright/test";
 import { readFile } from "fs/promises";
 import { sampleY4m } from "./fixtures/sample-y4m.mjs";
 import { sampleWebm } from "./fixtures/sample-webm.mjs";
+import { sampleAvWebm } from "./fixtures/sample-avwebm.mjs";
+import { sampleGif } from "./fixtures/sample-gif.mjs";
 
 // First use compiles a ~31 MB wasm; give every test generous room.
 test.setTimeout(120_000);
@@ -16,6 +18,10 @@ function y4mFile(name = "clip.y4m") {
 }
 function webmFile(name = "clip.webm") {
   return { name, mimeType: "video/webm", buffer: sampleWebm() };
+}
+// This one carries an audio track (440 Hz sine) as well as video.
+function avFile(name = "movie.webm") {
+  return { name, mimeType: "video/webm", buffer: sampleAvWebm() };
 }
 
 async function open(page, slug) {
@@ -79,6 +85,66 @@ test.describe("video tools (ffmpeg.wasm)", () => {
     await page.setInputFiles("#file-in", webmFile());
     await page.locator(".actions button.primary").click();
     await expect(page.locator(".error")).toContainText("start time", { timeout: 30_000 });
+    await expect(page.locator(".results")).toHaveCount(0);
+  });
+
+  test("convert reaches every container: MKV, MOV and AVI", async ({ page }) => {
+    await open(page, "convert-video");
+    await page.setInputFiles("#file-in", avFile());
+    const expected = [
+      ["mkv", "movie.mkv", (b) => b.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))],
+      ["mov", "movie.mov", (b) => b.subarray(4, 12).toString("latin1") === "ftypqt  "],
+      ["avi", "movie.avi", (b) =>
+        b.subarray(0, 4).toString("latin1") === "RIFF" &&
+        b.subarray(8, 12).toString("latin1") === "AVI "],
+    ];
+    for (const [fmt, name, check] of expected) {
+      await page.getByLabel("Convert to format").selectOption(fmt);
+      await run(page);
+      await expect(page.locator(".results .file-name")).toHaveText(name);
+      const { bytes } = await downloadBytes(page);
+      expect(check(bytes), `${fmt} magic`).toBe(true);
+    }
+  });
+
+  test("an animated GIF converts to a real MP4", async ({ page }) => {
+    await open(page, "convert-video");
+    await page.setInputFiles("#file-in", {
+      name: "meme.gif",
+      mimeType: "image/gif",
+      buffer: sampleGif(),
+    });
+    await run(page);
+    await expect(page.locator(".results .file-name")).toHaveText("meme.mp4");
+    const { bytes } = await downloadBytes(page);
+    expect(bytes.subarray(4, 8).toString("latin1")).toBe("ftyp");
+  });
+
+  test("extract audio: MP3 by default, WAV on request", async ({ page }) => {
+    await open(page, "extract-audio");
+    await page.setInputFiles("#file-in", avFile());
+    await run(page);
+    await expect(page.locator(".results .file-name")).toHaveText("movie.mp3");
+    const mp3 = await downloadBytes(page);
+    expect(mp3.bytes.subarray(0, 3).toString("latin1")).toBe("ID3");
+
+    await page.getByLabel("Audio format").selectOption("wav");
+    await run(page);
+    await expect(page.locator(".results .file-name")).toHaveText("movie.wav");
+    const wav = await downloadBytes(page);
+    expect(wav.bytes.subarray(0, 4).toString("latin1")).toBe("RIFF");
+    expect(wav.bytes.subarray(8, 12).toString("latin1")).toBe("WAVE");
+    // Uncompressed PCM of a 1.2 s track dwarfs the compressed source.
+    expect(wav.bytes.length).toBeGreaterThan(10_000);
+  });
+
+  test("extracting audio from a silent video fails with ffmpeg's reason", async ({ page }) => {
+    await open(page, "extract-audio");
+    await page.setInputFiles("#file-in", y4mFile());
+    await page.locator(".actions button.primary").click();
+    await expect(page.locator(".error")).toContainText(/does not contain any stream|ffmpeg failed/, {
+      timeout: 90_000,
+    });
     await expect(page.locator(".results")).toHaveCount(0);
   });
 

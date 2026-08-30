@@ -6,7 +6,7 @@ it: client-side only, wasm32-safe, free forever (see ADR-0001).
 
 ## Done
 
-- **35 tools** across PDF / Image / Compress / Protect / Video (see README
+- **36 tools** across PDF / Image / Compress / Protect / Video (see README
   table),
   covering most of the iLovePDF/iLoveIMG catalog that is feasible fully
   client-side — including standard AES-256 PDF password protection and

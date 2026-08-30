@@ -58,7 +58,7 @@ network — which is what makes the same code correct on wasm32 and native.
 | PDF      | Edit PDF (sign by hand, handwriting brush, image stamps), Merge PDF, Split PDF (ranges or burst), Rotate PDF, Compress PDF, Images to PDF, Watermark PDF, Reorder PDF, Add Page Numbers, Crop PDF, PDF to Text, PDF to Image (PNG/JPG/WebP), Repair PDF, Protect PDF (AES-256, opens anywhere), Unlock PDF |
 | Image    | Convert Image (PNG/JPG/WebP/GIF/BMP/TIFF/ICO/QOI), Resize Image, Compress Image, Crop Image, Rotate Image, Flip Image, Upscale Image (2x/4x), Grayscale Image, Blur Image, Watermark Image, Strip Metadata (EXIF), Favicon Generator (full .zip pack), Batch Rename |
 | Compress | Create ZIP, Extract ZIP |
-| Video    | Video to GIF, Trim Video (lossless stream copy), Convert Video (MP4 ↔ WebM) |
+| Video    | Video to GIF, Trim Video (lossless stream copy), Convert Video (MP4/WebM/MKV/MOV/AVI, GIFs in), Extract Audio (MP3/WAV/OGG/M4A) |
 | Protect  | Encrypt File / Decrypt File (AES-256-GCM `.pzv` vaults, PBKDF2 password keys) |
 
 A doc-sync test (`crates/pz-core/tests/docs_sync.rs`) fails the build if a

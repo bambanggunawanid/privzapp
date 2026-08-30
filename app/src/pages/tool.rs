@@ -70,6 +70,7 @@ pub fn ToolPage(slug: String) -> Element {
     let mut trim_start = use_signal(String::new);
     let mut trim_end = use_signal(String::new);
     let mut video_format = use_signal(|| "mp4".to_string());
+    let mut audio_format = use_signal(|| "mp3".to_string());
 
     let meta = *meta;
 
@@ -257,13 +258,15 @@ pub fn ToolPage(slug: String) -> Element {
     });
 
     let run = move |_: Event<MouseData>| {
-        let uses_video_format = meta.options.contains(&OptionKind::VideoFormat);
         let opts = ToolOptions {
             quality: quality(),
             width: width().trim().parse().unwrap_or(0),
             height: height().trim().parse().unwrap_or(0),
-            format: if uses_video_format {
+            // The format field is shared; each tool reads its own picker.
+            format: if meta.options.contains(&OptionKind::VideoFormat) {
                 video_format()
+            } else if meta.options.contains(&OptionKind::AudioFormat) {
+                audio_format()
             } else {
                 format()
             },
@@ -774,6 +777,22 @@ pub fn ToolPage(slug: String) -> Element {
                                         onchange: move |evt| video_format.set(evt.value()),
                                         option { value: "mp4", selected: video_format() == "mp4", "MP4 (H.264 — plays everywhere)" }
                                         option { value: "webm", selected: video_format() == "webm", "WebM (VP8 — royalty-free)" }
+                                        option { value: "mkv", selected: video_format() == "mkv", "MKV (Matroska)" }
+                                        option { value: "mov", selected: video_format() == "mov", "MOV (QuickTime)" }
+                                        option { value: "avi", selected: video_format() == "avi", "AVI (legacy compatibility)" }
+                                    }
+                                }
+                            },
+                            OptionKind::AudioFormat => rsx! {
+                                div { class: "opt",
+                                    label { "Audio format" }
+                                    select {
+                                        aria_label: "Audio format",
+                                        onchange: move |evt| audio_format.set(evt.value()),
+                                        option { value: "mp3", selected: audio_format() == "mp3", "MP3 (plays everywhere)" }
+                                        option { value: "wav", selected: audio_format() == "wav", "WAV (uncompressed, lossless)" }
+                                        option { value: "ogg", selected: audio_format() == "ogg", "OGG (Vorbis)" }
+                                        option { value: "m4a", selected: audio_format() == "m4a", "M4A (AAC)" }
                                     }
                                 }
                             },
