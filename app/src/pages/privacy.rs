@@ -15,7 +15,7 @@ pub fn Privacy() -> Element {
                 li { "They are never uploaded, never stored, never seen by us. There is no server to send them to." }
                 li { "The web app keeps working with your network disconnected — try it." }
             }
-            h2 { "What we collect" }
+            h2 { "What we collect: nothing" }
             ul {
                 li { "Nothing. No analytics, no page counters, no third-party scripts, no cookies — the site does not phone home at all." }
                 li { "There is no account, no email, no identifier of any kind, so there is nothing to link a visit to a person even in principle." }

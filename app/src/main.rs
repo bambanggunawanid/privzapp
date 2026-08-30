@@ -71,7 +71,7 @@ fn App() -> Element {
         document::Meta { name: "theme-color", content: "#0b0e14" }
         document::Meta {
             name: "description",
-            content: "Merge PDFs, convert images, compress anything — entirely on your device. No uploads, ever.",
+            content: "Merge PDFs, convert images, compress anything — entirely on your device. No uploads, no tracking, zero telemetry.",
         }
         document::Link { rel: "manifest", href: "/manifest.webmanifest" }
         document::Link { rel: "apple-touch-icon", href: "/apple-touch-icon.png" }

@@ -23,12 +23,13 @@ donations, not by your data.
 
 1. **Files never leave the device.** All processing is local (WASM/native).
    The web app keeps working with the network unplugged.
-2. **Free forever, no dark patterns.** No accounts, no ads, no premium tier,
+2. **Zero telemetry.** The app makes no network requests of its own — no
+   analytics, no page counters, no third-party scripts, no cookies. A UI
+   test enforces it (`tests/ui/no-phone-home.spec.js`). If per-tool metrics
+   ever ship they will be opt-in and bucketed (see `crates/pz-telemetry`) —
+   never filenames, contents, or ids.
+3. **Free forever, no dark patterns.** No accounts, no ads, no premium tier,
    no data sales. Revenue is donations only.
-3. **Telemetry is opt-in, anonymous, and bucketed.** Current builds send
-   *nothing at all* — no analytics, no page counters, no third-party
-   scripts. The future opt-in schema (see `crates/pz-telemetry`) can only
-   carry enumerable, coarse facts — never filenames, contents, or ids.
 4. **Security first.** `#![forbid(unsafe_code)]` across all engine crates,
    AES-256-GCM for anything PII-adjacent (`pz-crypto`), zip-slip and zip-bomb
    guards in `pz-archive`.

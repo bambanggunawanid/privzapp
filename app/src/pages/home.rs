@@ -38,6 +38,7 @@ pub fn Home() -> Element {
             }
             div { class: "hero-badges",
                 span { class: "badge", "🔒 100% private" }
+                span { class: "badge", "🚫 Zero telemetry" }
                 span { class: "badge", "⚡ Native speed" }
                 span { class: "badge", "📴 Works offline" }
                 span { class: "badge", "🆓 Free forever" }

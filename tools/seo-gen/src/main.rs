@@ -76,7 +76,7 @@ fn main() {
 
     // Home.
     let home_title = "PrivZapp — Free Online File Tools, Nothing Ever Uploaded";
-    let home_desc = "Merge & compress PDF, convert & resize images, zip files and more — free, in your browser. Files are processed on your device and never uploaded.";
+    let home_desc = "Merge & compress PDF, convert & resize images, zip files and more — free, in your browser. Files never leave your device, and there is zero telemetry.";
     let home_jsonld = serde_json::json!({
         "@context": "https://schema.org",
         "@type": "WebSite",
@@ -100,7 +100,7 @@ fn main() {
         (
             "privacy",
             "Privacy — PrivZapp Never Sees Your Files",
-            "How PrivZapp works: all processing happens in your browser via WebAssembly. No uploads, no accounts, no ads, nothing to leak.",
+            "How PrivZapp works: all processing happens in your browser via WebAssembly. No uploads, no accounts, no ads and zero telemetry — the app sends no requests of its own, so there is nothing to leak.",
         ),
         (
             "support",
@@ -167,7 +167,7 @@ fn main() {
     let mut llms = String::from(
         "# PrivZapp\n\n> Free in-browser file tools (PDF, image, archive, encryption). \
          All processing happens on-device via WebAssembly — files are never uploaded, \
-         there are no accounts, no ads and no third-party trackers.\n\n## Tools\n",
+         there are no accounts, no ads, and zero telemetry: the app makes no\n         network requests of its own and no third-party scripts are loaded.\n\n## Tools\n",
     );
     for tool in TOOLS {
         let seo = seo_for(tool.slug).expect("checked above");

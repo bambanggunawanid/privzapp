@@ -47,6 +47,13 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
   folder and one match arm in `app/src/icons.rs`.
 
 ### Added
+- **"Zero telemetry" is now a stated promise, and it is enforced.** The
+  home page carries it as a badge, both the prerendered and runtime meta
+  descriptions say it, and the Privacy page leads with "What we collect:
+  nothing". A UI test drives the app across the home grid, a tool page,
+  the editor and the Privacy page and fails if it contacts any other
+  host — or hits a same-origin path that even looks like a counter — so
+  the claim cannot quietly stop being true.
 - **OCR — Image to Text and OCR PDF**: read the text out of pictures,
   screenshots and scanned PDFs, entirely on-device (tesseract-wasm,
   ADR-0011). English and Indonesian models; scanned PDFs are rendered
