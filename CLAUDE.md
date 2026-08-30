@@ -22,10 +22,12 @@ crates that compile to both native and wasm32.
   contributor). Do not re-add telemetry, analytics or a beacon without
   explicit owner sign-off.
   Analytics were built and then deliberately removed (ADR-0012, Reverted):
-  the app sends NO requests of its own. `deploy/goatcounter/` keeps the
-  working sidecar for a possible future paid tier, wired to nothing.
-  Re-introducing any beacon, counter or third-party script needs explicit
-  owner sign-off plus a Privacy page update.
+  the app sends NO requests of its own, and there is no analytics code in
+  the repo at all — the sidecar that briefly existed was deleted too, so
+  nothing here can prompt "do you track?" from a contributor or a secret
+  scanner. Re-introducing any beacon, counter or third-party script needs
+  explicit owner sign-off plus a Privacy page update. ADR-0012 has the
+  reasoning and the traps if it ever comes back.
 - **UI copy promises** ("nothing is uploaded", "works offline") are product
   claims — don't add code that makes them false.
 

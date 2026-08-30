@@ -1,8 +1,9 @@
 # ADR-0012: Anonymous page counting via self-hosted GoatCounter
 
-- **Status**: Reverted 2026-08-30 (built, verified, then removed by owner
-  decision — the implementation is kept in `deploy/goatcounter/`, wired to
-  nothing, as the starting point for a future paid tier)
+- **Status**: Reverted 2026-08-30 — built, verified, then removed by owner
+  decision, and the sidecar implementation deleted with it. This record is
+  what remains; recover the code from git history (`60bf108`, `86652fa`)
+  if a future paid tier needs server-side features.
 - **Date**: 2026-08-30
 
 ## Context
@@ -110,8 +111,27 @@ no sessions by design. The decisive arguments:
   rate, so the numbers skew low regardless.
 
 Kept for the record because the reasoning (especially the GA rejection
-and the collect-bitmask trap) is worth not rediscovering. If a paid tier
-ever wants server-side features, `deploy/goatcounter/` still builds and
-runs; re-wiring it means restoring the nginx `location = /gc/count`
-block, the beacon module (see git history, commit 60bf108) and the
-disclosure.
+and the collect-bitmask trap) is worth not rediscovering.
+
+The sidecar files were deleted too, a few hours after the revert. Unwired
+analytics infrastructure is not free to keep: a contributor reading the
+repo still has to ask "so do you track?", and the entrypoint's
+`${VAR:?message}` guard produced a false-positive GitGuardian incident on
+a line containing no secret. Rebuilding from this ADR plus git history
+(`60bf108` for the beacon and the sidecar, `86652fa` for the revert) is
+cheaper than carrying dead code that keeps raising questions.
+
+### The traps, if it ever comes back
+
+- `collect` is an **iota bitmask** in GoatCounter's `settings.go`. In
+  v2.7.0: Referrer=2, UserAgent=4, ScreenSize=8, **Location=16**,
+  LocationRegion=32, Language=64, Session=128. Shipping `32` (region)
+  instead of `16` (country) silently collects the wrong thing — and it
+  shipped that way for an afternoon.
+- `proxy_pass http://goatcounter:8080;` without the `/count` URI makes
+  every beacon 404: counting silently never works.
+- nginx resolves the upstream hostname once at startup; recreate the
+  sidecar alone and beacons 504 until the web container restarts.
+- GoatCounter logs the raw User-Agent of bot-classified requests.
+- Don't write a credential-shaped variable with shell's `:?` expansion —
+  scanners read the message as an assigned value.

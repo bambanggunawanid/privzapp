@@ -85,8 +85,10 @@ path:
   Reverted) — the data was thin, opt-in would have been strictly worse
   than nothing, and "we collect nothing" is worth more than a per-country
   page count. Search Console covers the traffic question for free.
-  `deploy/goatcounter/` keeps the working sidecar, wired to nothing, as a
-  starting point if a paid tier ever needs server-side features.
+  The sidecar itself was deleted on 2026-08-30 as well: unwired analytics
+  infrastructure still invites "do you track?" from contributors, and it
+  had already produced one false-positive secret-scanner alert. ADR-0012
+  keeps the design and the traps for whoever needs them.
 - **Telemetry**: none, and none planned. The dormant `pz-telemetry` crate
   was deleted 2026-08-30 — in an open-source repo a disabled telemetry
   crate still makes every new contributor ask "so what do you collect?",
