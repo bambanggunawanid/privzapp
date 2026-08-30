@@ -118,6 +118,21 @@ test fails the build if the README tools table or CHANGELOG lags the registry
 
 ## Pull requests
 
+`main` is protected. Every pull request needs:
+
+- **CI green.** The `verify` and `ui-tests` jobs are required checks, and
+  your branch must be up to date with `main` before merging. `audit`
+  (RustSec advisories) also runs and is worth reading, but it is not
+  merge-blocking — a newly published advisory shouldn't stop an unrelated
+  fix.
+- **A review from the maintainer.** `.github/CODEOWNERS` routes every PR
+  to @bambanggunawanid, and conversations must be resolved before merge.
+
+Force pushes and branch deletion on `main` are disabled for everyone.
+Admin enforcement is intentionally off, so the maintainer can push and
+merge without waiting on a second approval — GitHub does not let anyone
+approve their own PR, and a one-person bottleneck helps no one.
+
 - Keep `./scripts/verify.sh` green; add/adjust tests with the behavior they
   pin.
 - Update `CHANGELOG.md` (and the README table for new tools) in the same
