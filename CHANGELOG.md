@@ -47,6 +47,19 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
   folder and one match arm in `app/src/icons.rs`.
 
 ### Added
+- **Video tools** — a fifth category, powered by FFmpeg compiled to
+  WebAssembly (ADR-0005 design, ADR-0010 implementation), fetched
+  version- and sha256-pinned and served from this origin, never a CDN:
+  - **Video to GIF**: two-pass palette for clean colors, frame rate,
+    width and time-range controls.
+  - **Trim Video**: lossless stream copy — original quality, near
+    instant; the cut snaps to the keyframe before the start time.
+  - **Convert Video**: MP4 (H.264 + AAC) ↔ WebM (VP8 + Opus) with a
+    quality slider.
+  Everything runs in a Web Worker on the user's device; the ~10 MB
+  (compressed) engine downloads on first use and is cached for offline
+  after that. The pure engine crates are untouched: these slugs are
+  `ToolPipeline::BrowserFfmpeg` and `pz_engine::run` refuses them.
 - **PDF to Image**: every page of a PDF as a PNG, JPG or WebP, at 1x-4x
   (72-288 DPI), with an optional page range — one page downloads as an
   image, several as a .zip. Pure-Rust rasterization still doesn't exist,

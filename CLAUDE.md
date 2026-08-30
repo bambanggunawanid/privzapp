@@ -127,6 +127,16 @@ crates that compile to both native and wasm32.
   only zips the result (ADR-0009). `pz_engine::run` rejects such slugs on
   purpose; don't "fix" that by adding an arm. Every other tool stays
   `ToolPipeline::Engine`.
+- Video tools run on ffmpeg.wasm (ADR-0010): `ToolPipeline::BrowserFfmpeg`,
+  `app/src/video.rs` + `app/assets/videotool.js`. The ~31 MB core is NOT
+  in git — `scripts/fetch-ffmpeg.sh` fetches it sha256-pinned into
+  `app/ffmpeg/` (gitignored) and `scripts/build-web.sh` copies it to the
+  bundle root UNhashed (the wrapper resolves its worker chunk relative to
+  its own URL). In `dx serve` dev, /ffmpeg/ 404s like the PWA files —
+  exercise video tools through the built bundle. Single-threaded core on
+  purpose (the mt build needs cross-origin isolation, rejected in
+  ADR-0004). Never "upgrade" it to a CDN load, and never add the COOP/COEP
+  headers just to get threads.
 - The PDF editor (`app/src/pages/editor.rs` + `app/assets/editor.js`) is
   the one sanctioned JS-library exception: bundled PDF.js renders pages,
   Rust does ALL mutation (`pz_pdf::annotate`). Don't add other JS libs or

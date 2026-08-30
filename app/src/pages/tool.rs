@@ -63,6 +63,10 @@ pub fn ToolPage(slug: String) -> Element {
     let mut password = use_signal(String::new);
     let mut scale = use_signal(|| 2u32);
     let mut percent = use_signal(|| 100u32);
+    let mut fps = use_signal(|| 12u32);
+    let mut trim_start = use_signal(String::new);
+    let mut trim_end = use_signal(String::new);
+    let mut video_format = use_signal(|| "mp4".to_string());
 
     let meta = *meta;
 
@@ -159,6 +163,7 @@ pub fn ToolPage(slug: String) -> Element {
             password: password(),
             scale: scale(),
             percent: percent(),
+            ..ToolOptions::default()
         };
         spawn(async move {
             match crate::engine::run(meta.slug, vec![f.clone()], &opts).await {
@@ -203,11 +208,16 @@ pub fn ToolPage(slug: String) -> Element {
     };
 
     let run = move |_: Event<MouseData>| {
+        let uses_video_format = meta.options.contains(&OptionKind::VideoFormat);
         let opts = ToolOptions {
             quality: quality(),
             width: width().trim().parse().unwrap_or(0),
             height: height().trim().parse().unwrap_or(0),
-            format: format(),
+            format: if uses_video_format {
+                video_format()
+            } else {
+                format()
+            },
             pages: pages_spec(),
             angle: angle(),
             text: text(),
@@ -216,6 +226,9 @@ pub fn ToolPage(slug: String) -> Element {
             password: password(),
             scale: scale(),
             percent: percent(),
+            fps: fps(),
+            trim_start: trim_start(),
+            trim_end: trim_end(),
         };
         busy.set(true);
         error.set(String::new());
@@ -230,6 +243,11 @@ pub fn ToolPage(slug: String) -> Element {
                 ToolPipeline::BrowserRender => match input.first() {
                     Some(file) => crate::render::pdf_to_images(file, &opts).await,
                     None => Err("pick a PDF first".to_string()),
+                },
+                // Video work runs through the bundled ffmpeg.wasm (ADR-0010).
+                ToolPipeline::BrowserFfmpeg => match input.first() {
+                    Some(file) => crate::video::run_video_tool(file, meta.slug, &opts).await,
+                    None => Err("pick a video first".to_string()),
                 },
             };
             match result {
@@ -252,6 +270,9 @@ pub fn ToolPage(slug: String) -> Element {
         // through it, PDF.js) — every other tool stays wasm-only.
         if meta.pipeline == ToolPipeline::BrowserRender {
             document::Script { src: crate::render::PDFRENDER_JS }
+        }
+        if meta.pipeline == ToolPipeline::BrowserFfmpeg {
+            document::Script { src: crate::video::VIDEOTOOL_JS }
         }
         section { class: "tool-head",
             if let Some(src) = crate::icons::tool_icon(meta.slug) {
@@ -686,6 +707,53 @@ pub fn ToolPage(slug: String) -> Element {
                                         option { value: "2", selected: scale() == 2, "2× — 144 DPI (default)" }
                                         option { value: "3", selected: scale() == 3, "3× — 216 DPI" }
                                         option { value: "4", selected: scale() == 4, "4× — 288 DPI (print/OCR)" }
+                                    }
+                                }
+                            },
+                            OptionKind::VideoFormat => rsx! {
+                                div { class: "opt",
+                                    label { "Convert to" }
+                                    select {
+                                        aria_label: "Convert to format",
+                                        onchange: move |evt| video_format.set(evt.value()),
+                                        option { value: "mp4", selected: video_format() == "mp4", "MP4 (H.264 — plays everywhere)" }
+                                        option { value: "webm", selected: video_format() == "webm", "WebM (VP8 — royalty-free)" }
+                                    }
+                                }
+                            },
+                            OptionKind::Fps => rsx! {
+                                div { class: "opt",
+                                    label { "Frame rate" }
+                                    select {
+                                        aria_label: "Frame rate",
+                                        onchange: move |evt| fps.set(evt.value().parse().unwrap_or(12)),
+                                        option { value: "5", selected: fps() == 5, "5 fps (tiny file)" }
+                                        option { value: "10", selected: fps() == 10, "10 fps" }
+                                        option { value: "12", selected: fps() == 12, "12 fps (default)" }
+                                        option { value: "15", selected: fps() == 15, "15 fps" }
+                                        option { value: "24", selected: fps() == 24, "24 fps (smooth, big)" }
+                                    }
+                                }
+                            },
+                            OptionKind::TimeRange => rsx! {
+                                div { class: "opt",
+                                    label { "Start (e.g. 0:05 — empty = from the beginning)" }
+                                    input {
+                                        r#type: "text",
+                                        aria_label: "Start time",
+                                        placeholder: "0:00",
+                                        value: "{trim_start}",
+                                        oninput: move |evt| trim_start.set(evt.value()),
+                                    }
+                                }
+                                div { class: "opt",
+                                    label { "End (e.g. 0:15 — empty = to the end)" }
+                                    input {
+                                        r#type: "text",
+                                        aria_label: "End time",
+                                        placeholder: "0:10",
+                                        value: "{trim_end}",
+                                        oninput: move |evt| trim_end.set(evt.value()),
                                     }
                                 }
                             },

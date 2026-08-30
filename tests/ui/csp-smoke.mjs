@@ -7,6 +7,7 @@
 import { chromium } from "@playwright/test";
 import { samplePng } from "./fixtures/sample-png.mjs";
 import { samplePdf } from "./fixtures/sample-pdf.mjs";
+import { sampleY4m } from "./fixtures/sample-y4m.mjs";
 
 const base = process.argv[2] || "http://127.0.0.1:8090";
 const browser = await chromium.launch();
@@ -40,9 +41,21 @@ await page.setInputFiles("#pdf-in", {
 });
 await page.waitForSelector(".pz-page canvas", { timeout: 30_000 });
 
+// ffmpeg.wasm must spawn its worker and importScripts the core — the two
+// moves most likely to trip script-src/worker-src.
+await page.goto(`${base}/tool/video-to-gif/`);
+await page.waitForSelector("#file-in", { state: "attached", timeout: 45_000 });
+await page.setInputFiles("#file-in", {
+  name: "smoke.y4m",
+  mimeType: "video/x-yuv4mpeg",
+  buffer: sampleY4m(),
+});
+await page.locator(".actions button.primary").click();
+await page.waitForSelector(".results", { timeout: 90_000 });
+
 await browser.close();
 if (violations.length) {
   console.error("CSP smoke FAILED:\n" + violations.join("\n"));
   process.exit(1);
 }
-console.log("CSP smoke passed: wasm boot, engine preview and PDF.js all fine under the deployed headers.");
+console.log("CSP smoke passed: wasm boot, engine preview, PDF.js and ffmpeg.wasm all fine under the deployed headers.");

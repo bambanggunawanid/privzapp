@@ -41,6 +41,9 @@ pub fn tool_icon(slug: &str) -> Option<Asset> {
         "unzip" => asset!("/assets/icons/unzip.svg"),
         "encrypt-file" => asset!("/assets/icons/encrypt-file.svg"),
         "decrypt-file" => asset!("/assets/icons/decrypt-file.svg"),
+        "video-to-gif" => asset!("/assets/icons/video-to-gif.svg"),
+        "trim-video" => asset!("/assets/icons/trim-video.svg"),
+        "convert-video" => asset!("/assets/icons/convert-video.svg"),
         _ => return None,
     })
 }

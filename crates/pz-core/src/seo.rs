@@ -635,6 +635,67 @@ pub const TOOL_SEO: &[ToolSeo] = &[
             ),
         ],
     },
+    ToolSeo {
+        slug: "video-to-gif",
+        title: "Video to GIF — Convert MP4/WebM to GIF | PrivZapp",
+        description: "Turn a video clip into a looping GIF free in your browser. Pick the frame rate, width and time range. The video is never uploaded to a server.",
+        faq: &[
+            (
+                "How do I turn a video into a GIF?",
+                "Drop the clip in, choose a frame rate and width, optionally set start and end times, and run it. The GIF is built on your device with a two-pass palette, so colors stay clean.",
+            ),
+            (
+                "Why is the first run slower than the rest?",
+                "The converter is a full FFmpeg compiled to WebAssembly (about a 10 MB download, fetched once and cached). After that first load it runs locally at native-like speed — even offline.",
+            ),
+            (
+                "How do I keep the GIF small?",
+                "Lower the frame rate (10-12 fps reads fine), reduce the width, and keep the clip short with the time range — GIF is an old format and grows quickly.",
+            ),
+            (
+                "Is my video uploaded to convert it?",
+                "No. FFmpeg runs inside your browser tab; the file never leaves your device and there is no server that could keep a copy.",
+            ),
+        ],
+    },
+    ToolSeo {
+        slug: "trim-video",
+        title: "Trim Video Online Free — Cut MP4/WebM | PrivZapp",
+        description: "Cut a clip out of a video free in your browser, without re-encoding — original quality, fast. Nothing is uploaded; the file stays on your device.",
+        faq: &[
+            (
+                "How do I cut a video without losing quality?",
+                "Enter start and end times and run it. The tool copies the original video and audio streams into a new file instead of re-encoding, so the quality is exactly what went in.",
+            ),
+            (
+                "Why doesn't the cut land exactly on my start time?",
+                "Lossless cutting can only start at a keyframe, so the clip snaps to the nearest one before your start time — usually a fraction of a second early. Re-encode with Convert Video afterwards if you need frame-exact edges.",
+            ),
+            (
+                "Is my video uploaded to trim it?",
+                "No. The cut happens in your browser via FFmpeg compiled to WebAssembly (fetched once, about 10 MB, then cached). The video never leaves your device.",
+            ),
+        ],
+    },
+    ToolSeo {
+        slug: "convert-video",
+        title: "Convert Video — MP4 to WebM & Back | PrivZapp",
+        description: "Convert videos between MP4 (H.264) and WebM free in your browser with a quality slider. Files are never uploaded — FFmpeg runs on your own device.",
+        faq: &[
+            (
+                "How do I convert a video to MP4 or WebM?",
+                "Drop the video in, pick the target format and a quality level, and run it. Audio is converted along with the picture (AAC for MP4, Opus for WebM).",
+            ),
+            (
+                "Why does converting take a while?",
+                "Re-encoding video is heavy work, and here it runs entirely on your device — a full FFmpeg compiled to WebAssembly (about a 10 MB one-time download) rather than a server farm. Long videos take minutes; nothing ever uploads.",
+            ),
+            (
+                "Which format should I pick?",
+                "MP4 (H.264) plays everywhere, including older devices. WebM is royalty-free and often smaller at the same quality, and every modern browser plays it.",
+            ),
+        ],
+    },
 ];
 
 /// SEO copy for a tool page.

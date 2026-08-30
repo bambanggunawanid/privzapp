@@ -20,10 +20,11 @@ don't work around it.
   (`Pdf`/`Image`/`Archive`/`Security`), `accept` filter, `multi`,
   `min_files`, `options`, emoji icon, `pipeline`.
 - `pipeline` is `ToolPipeline::Engine` for anything that is a pure engine
-  call — that's every tool but one. `BrowserRender` is only for work the
-  engine physically can't do headless (PDF rasterization, ADR-0009); it
-  means writing the app-side path yourself in `app/src/render.rs`, and
-  `pz_engine::run` will refuse the slug.
+  call — that's almost every tool. `BrowserRender` (PDF rasterization via
+  PDF.js, ADR-0009, `app/src/render.rs`) and `BrowserFfmpeg` (video via
+  ffmpeg.wasm, ADR-0010, `app/src/video.rs`) are only for work the engine
+  physically can't do; both mean writing the app-side path yourself, and
+  `pz_engine::run` refuses such slugs.
 - If no existing `OptionKind` fits the tool's knobs, add a variant — then
   `app/src/pages/tool.rs` will fail to compile until you add its widget arm
   (that's the point; the match is exhaustive on purpose).

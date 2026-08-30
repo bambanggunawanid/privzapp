@@ -315,6 +315,7 @@ a:hover { text-decoration: underline; }
 .cat-image { background: rgba(56, 189, 248, 0.16); }
 .cat-archive { background: rgba(251, 191, 36, 0.16); }
 .cat-security { background: rgba(167, 139, 250, 0.18); }
+.cat-video { background: rgba(45, 212, 191, 0.16); }
 
 /* SVG tile icons (app/assets/icons) paint their own rounded tile —
    size them like the emoji tiles but without the category tint. */

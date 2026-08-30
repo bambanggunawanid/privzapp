@@ -6,7 +6,8 @@ it: client-side only, wasm32-safe, free forever (see ADR-0001).
 
 ## Done
 
-- **32 tools** across PDF / Image / Compress / Protect (see README table),
+- **35 tools** across PDF / Image / Compress / Protect / Video (see README
+  table),
   covering most of the iLovePDF/iLoveIMG catalog that is feasible fully
   client-side — including standard AES-256 PDF password protection and
   removal, page numbers, PDF crop/repair/text-extraction, and the common
@@ -21,22 +22,18 @@ it: client-side only, wasm32-safe, free forever (see ADR-0001).
   still doesn't exist; this borrows the editor's renderer instead of
   waiting for one.
 - **Password vaults**: AES-256-GCM `.pzv` files (ADR-0003).
+- **Video/GIF tools** (2026-08-30, ADR-0005 design + ADR-0010
+  implementation): Video to GIF, lossless Trim, MP4 ↔ WebM conversion via
+  the prebuilt ffmpeg.wasm — fetched pinned by sha256, served same-origin
+  from /ffmpeg/, loaded lazily in a Web Worker, single-threaded core so no
+  cross-origin isolation is needed. The engine crates stay pure; the slugs
+  are `ToolPipeline::BrowserFfmpeg` and `pz_engine::run` refuses them.
 - **Web Worker offloading** (2026-08-25, ADR-0004 Accepted): the engine
   runs off the main thread in the built bundle, transferable
   `ArrayBuffer`s avoid copies, and the UI falls back to inline execution
   where workers are unavailable — big files no longer freeze the tab.
 
 ## Approved, designed, not yet built
-
-### ffmpeg-to-WASM video/GIF tools (ADR-0005, Proposed)
-Video convert/trim/GIF-ify, still fully client-side. Design: ffmpeg.wasm
-(or a trimmed custom emscripten build) loaded **lazily** as a separate
-multi-MB module only when a video tool opens; isolated in a `pz-video`
-crate/JS shim so the C exception never leaks into the pure engine crates;
-same bytes-in/bytes-out contract. Needs: emscripten toolchain, bundle-size
-budget (~25 MB), and a licensing pass (LGPL build config, no GPL codecs) —
-none of which fit the current container. First concrete step when picked
-up: prototype `ffmpeg.wasm` npm package behind a feature-flagged route.
 
 ### Folder support for drag-and-drop
 Dropping a directory needs `webkitGetAsEntry` recursion (JS interop beyond

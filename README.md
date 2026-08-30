@@ -58,6 +58,7 @@ network — which is what makes the same code correct on wasm32 and native.
 | PDF      | Edit PDF (sign by hand, handwriting brush, image stamps), Merge PDF, Split PDF (ranges or burst), Rotate PDF, Compress PDF, Images to PDF, Watermark PDF, Reorder PDF, Add Page Numbers, Crop PDF, PDF to Text, PDF to Image (PNG/JPG/WebP), Repair PDF, Protect PDF (AES-256, opens anywhere), Unlock PDF |
 | Image    | Convert Image (PNG/JPG/WebP/GIF/BMP/TIFF/ICO/QOI), Resize Image, Compress Image, Crop Image, Rotate Image, Flip Image, Upscale Image (2x/4x), Grayscale Image, Blur Image, Watermark Image, Strip Metadata (EXIF), Favicon Generator (full .zip pack), Batch Rename |
 | Compress | Create ZIP, Extract ZIP |
+| Video    | Video to GIF, Trim Video (lossless stream copy), Convert Video (MP4 ↔ WebM) |
 | Protect  | Encrypt File / Decrypt File (AES-256-GCM `.pzv` vaults, PBKDF2 password keys) |
 
 A doc-sync test (`crates/pz-core/tests/docs_sync.rs`) fails the build if a
@@ -130,7 +131,7 @@ Details, designs and rationale live in [docs/ROADMAP.md](docs/ROADMAP.md).
 - [x] PDF: reorder pages, images → PDF, watermark
 - [x] PDF: page → image export ([design](docs/adr/0009-browser-rasterization.md))
 - [x] Image: batch rename, EXIF strip (privacy!), crop
-- [ ] Video/GIF tools via ffmpeg compiled to WASM ([design](docs/adr/0005-ffmpeg-wasm.md))
+- [x] Video/GIF tools via ffmpeg compiled to WASM ([design](docs/adr/0005-ffmpeg-wasm.md), [implementation](docs/adr/0010-ffmpeg-wasm-integration.md))
 - [x] Password-protect any file (AES-256 `.pzv` vaults via `pz-crypto`)
 - [ ] Opt-in telemetry wiring + public dashboard of the little we collect
 - [x] Donation integrations ([Ko-fi](https://ko-fi.com/S7F125OT18), [GitHub Sponsors](https://github.com/sponsors/bambanggunawanid))

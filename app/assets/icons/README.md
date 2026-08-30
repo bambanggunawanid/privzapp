@@ -1,7 +1,7 @@
 # Tool tile icons
 
-One unique 64x64 SVG per tool — all 32 of them (15 PDF, 13 image, 2
-archive, 2 security). Gold/orange + electric-blue accents on a rounded
+One unique 64x64 SVG per tool — all 35 of them (15 PDF, 13 image, 2
+archive, 2 security, 3 video). Gold/orange + electric-blue accents on a rounded
 tile, no external assets.
 
 The tile gradient is the tool's **category** colour, hue-matched to the
@@ -13,6 +13,7 @@ The tile gradient is the tool's **category** colour, hue-matched to the
 | Image    | `#24455C` `#1B3242` | `.cat-image`  |
 | Archive  | `#4C3919` `#362713` | `.cat-archive`|
 | Security | `#40325E` `#2E2545` | `.cat-security`|
+| Video    | `#1C4B42` `#143630` | `.cat-video`  |
 
 Keep new tiles in that range: every accent colour used in the set stays
 above 3:1 contrast (WCAG 1.4.11, graphical objects) against both stops.

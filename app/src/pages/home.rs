@@ -10,6 +10,7 @@ fn cat_class(cat: ToolCategory) -> &'static str {
         ToolCategory::Image => "cat-image",
         ToolCategory::Archive => "cat-archive",
         ToolCategory::Security => "cat-security",
+        ToolCategory::Video => "cat-video",
     }
 }
 
@@ -20,6 +21,7 @@ pub fn Home() -> Element {
         ToolCategory::Image,
         ToolCategory::Archive,
         ToolCategory::Security,
+        ToolCategory::Video,
     ];
     // None = show everything.
     let mut filter = use_signal(|| Option::<ToolCategory>::None);

@@ -1,6 +1,6 @@
 # ADR-0005: Video/GIF tools via ffmpeg compiled to WASM
 
-- **Status**: Proposed (approved direction; needs toolchain + licensing pass)
+- **Status**: Accepted — implemented 2026-08-30, see [ADR-0010](0010-ffmpeg-wasm-integration.md)
 - **Date**: 2026-08-24
 
 ## Context

@@ -9,6 +9,7 @@ mod icons;
 mod pages;
 mod render;
 mod save;
+mod video;
 
 use dioxus::prelude::*;
 
@@ -162,6 +163,7 @@ fn Shell() -> Element {
                     pz_core::ToolCategory::Image,
                     pz_core::ToolCategory::Archive,
                     pz_core::ToolCategory::Security,
+                    pz_core::ToolCategory::Video,
                 ] {
                     div { class: "mega-col",
                         h4 { {cat.label()} " tools" }

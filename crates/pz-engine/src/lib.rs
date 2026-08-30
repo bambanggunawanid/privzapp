@@ -26,7 +26,7 @@ pub fn run(
     // headless path (no pure-Rust PDF renderer exists — ADR-0009). The app
     // renders in the browser and calls back here to package the result, so
     // reaching this with such a slug means the caller took the wrong path.
-    if meta.pipeline == ToolPipeline::BrowserRender {
+    if meta.pipeline != ToolPipeline::Engine {
         return Err(PzError::Unsupported(format!(
             "\"{}\" needs the browser to render the pages; it cannot run through the engine directly",
             meta.name

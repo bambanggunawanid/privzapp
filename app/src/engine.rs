@@ -98,6 +98,7 @@ mod web {
                 password: w.password,
                 scale: w.scale,
                 percent: w.percent,
+                ..Self::default()
             }
         }
     }

@@ -24,6 +24,14 @@ fi
 
 cp app/pwa/* "$OUT/"
 
+# ffmpeg.wasm for the video tools (ADR-0010): fetched pinned, served
+# UNhashed from /ffmpeg/ — the wrapper resolves its worker chunk relative
+# to its own URL, which dx asset hashing would break. Lazily loaded, so
+# it costs nothing until a video tool runs.
+./scripts/fetch-ffmpeg.sh
+mkdir -p "$OUT/ffmpeg"
+cp app/ffmpeg/*.js app/ffmpeg/*.wasm app/ffmpeg/LICENSE.md "$OUT/ffmpeg/"
+
 # Prerender SEO pages (per-tool HTML, sitemap, robots) from the registry.
 # BASE_URL must be the real production origin for canonicals to be valid.
 BASE_URL="${BASE_URL:-https://privzapp.com}" cargo run --quiet --release -p seo-gen -- "$OUT"

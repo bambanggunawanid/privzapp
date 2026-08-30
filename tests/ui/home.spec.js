@@ -8,12 +8,12 @@ test.describe("home + nav", () => {
   });
 
   test("category filter chips narrow the grid", async ({ page }) => {
-    await expect(page.locator(".tool-section")).toHaveCount(4);
+    await expect(page.locator(".tool-section")).toHaveCount(5);
     await page.locator(".cat-chip", { hasText: "Image" }).click();
     await expect(page.locator(".tool-section")).toHaveCount(1);
     await expect(page.locator(".tool-section h2")).toHaveText(/Image/);
     await page.locator(".cat-chip", { hasText: "All" }).click();
-    await expect(page.locator(".tool-section")).toHaveCount(4);
+    await expect(page.locator(".tool-section")).toHaveCount(5);
   });
 
   test("every tool card shows its SVG tile icon", async ({ page }) => {
@@ -21,8 +21,8 @@ test.describe("home + nav", () => {
     // class), and the srcs survive dx asset hashing. The emoji tile is
     // the fallback for a tool added without an icon — none left today.
     const cards = await page.locator(".tool-card").count();
-    expect(cards).toBe(32);
-    await expect(page.locator("img.tool-tile-svg")).toHaveCount(32);
+    expect(cards).toBe(35);
+    await expect(page.locator("img.tool-tile-svg")).toHaveCount(35);
     await expect(page.locator("span.tool-tile")).toHaveCount(0);
     for (const [name, slug] of [
       ["Merge PDF", "merge-pdf"],
@@ -59,9 +59,10 @@ test.describe("home + nav", () => {
       Image: "#24455C",
       Compress: "#4C3919", // ToolCategory::Archive
       Protect: "#40325E", // ToolCategory::Security
+      Video: "#1C4B42",
     };
     const sections = await page.locator(".tool-section").count();
-    expect(sections).toBe(4);
+    expect(sections).toBe(5);
     let checked = 0;
     for (let i = 0; i < sections; i++) {
       const section = page.locator(".tool-section").nth(i);
@@ -79,7 +80,7 @@ test.describe("home + nav", () => {
         checked++;
       }
     }
-    expect(checked).toBe(32);
+    expect(checked).toBe(35);
   });
 
   // Regression: on a phone the "All tools" and "Support us" labels wrapped

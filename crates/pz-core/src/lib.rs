@@ -89,6 +89,7 @@ pub enum ToolCategory {
     Image,
     Archive,
     Security,
+    Video,
 }
 
 impl ToolCategory {
@@ -98,6 +99,7 @@ impl ToolCategory {
             ToolCategory::Image => "Image",
             ToolCategory::Archive => "Compress",
             ToolCategory::Security => "Protect",
+            ToolCategory::Video => "Video",
         }
     }
 }
@@ -137,6 +139,12 @@ pub enum OptionKind {
     Strength,
     /// Output format select for PDF page rasterization (PNG/JPG/WebP).
     RasterFormat,
+    /// Output container select for video conversion (MP4/WebM).
+    VideoFormat,
+    /// Output frame rate select for GIF conversion.
+    Fps,
+    /// Optional start/end timecodes ("90", "1:30" or "1:30:05.5").
+    TimeRange,
     /// 1x-4x render scale for PDF page rasterization (1x = 72 DPI).
     RenderScale,
 }
@@ -156,6 +164,9 @@ pub enum ToolPipeline {
     /// Pages are rendered in the browser (PDF.js), then the engine packages
     /// the result. Web/desktop only — there is no headless path.
     BrowserRender,
+    /// The bundled ffmpeg.wasm does the work in a Web Worker (ADR-0010).
+    /// Same rule: browser only, and `pz_engine::run` refuses the slug.
+    BrowserFfmpeg,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -573,6 +584,46 @@ pub const TOOLS: &[ToolMeta] = &[
         icon: "🔓",
         pipeline: ToolPipeline::Engine,
     },
+    ToolMeta {
+        slug: "video-to-gif",
+        name: "Video to GIF",
+        tagline: "Turn any clip into a looping GIF",
+        category: ToolCategory::Video,
+        accept: "video/*",
+        multi: false,
+        min_files: 1,
+        options: &[
+            OptionKind::Fps,
+            OptionKind::Dimensions,
+            OptionKind::TimeRange,
+        ],
+        icon: "🎞️",
+        pipeline: ToolPipeline::BrowserFfmpeg,
+    },
+    ToolMeta {
+        slug: "trim-video",
+        name: "Trim Video",
+        tagline: "Cut a clip without re-encoding it",
+        category: ToolCategory::Video,
+        accept: "video/*",
+        multi: false,
+        min_files: 1,
+        options: &[OptionKind::TimeRange],
+        icon: "✂️",
+        pipeline: ToolPipeline::BrowserFfmpeg,
+    },
+    ToolMeta {
+        slug: "convert-video",
+        name: "Convert Video",
+        tagline: "MP4 ↔ WebM, right in your browser",
+        category: ToolCategory::Video,
+        accept: "video/*",
+        multi: false,
+        min_files: 1,
+        options: &[OptionKind::VideoFormat, OptionKind::Quality],
+        icon: "🎬",
+        pipeline: ToolPipeline::BrowserFfmpeg,
+    },
 ];
 
 pub fn tool_by_slug(slug: &str) -> Option<&'static ToolMeta> {
@@ -604,6 +655,11 @@ pub struct ToolOptions {
     pub scale: u32,
     /// Output resolution percentage for compressors (10–100; 100 = keep).
     pub percent: u32,
+    /// Output frame rate for GIF conversion.
+    pub fps: u32,
+    /// Optional clip start/end timecodes (empty = start/end of the video).
+    pub trim_start: String,
+    pub trim_end: String,
 }
 
 impl Default for ToolOptions {
@@ -621,8 +677,35 @@ impl Default for ToolOptions {
             password: String::new(),
             scale: 2,
             percent: 100,
+            fps: 12,
+            trim_start: String::new(),
+            trim_end: String::new(),
         }
     }
+}
+
+/// Parse a timecode like "90", "1:30", "01:02:03" or "1:30.5" into
+/// seconds. Fractions are allowed on the last field only; fields after
+/// the first must stay below 60.
+pub fn parse_timecode(spec: &str) -> Result<f64, PzError> {
+    let spec = spec.trim();
+    let bad = || PzError::Invalid(format!("\"{spec}\" is not a time — use seconds or mm:ss"));
+    let parts: Vec<&str> = spec.split(':').collect();
+    if spec.is_empty() || parts.len() > 3 {
+        return Err(bad());
+    }
+    let mut secs = 0.0f64;
+    for (i, part) in parts.iter().enumerate() {
+        let last = i == parts.len() - 1;
+        let v: f64 = part.parse().map_err(|_| bad())?;
+        let whole_and_small = v.fract() == 0.0 && (i == 0 || v < 60.0);
+        if !v.is_finite() || v < 0.0 || (!last && !whole_and_small) || (last && i > 0 && v >= 60.0)
+        {
+            return Err(bad());
+        }
+        secs = secs * 60.0 + v;
+    }
+    Ok(secs)
 }
 
 /// Parse a 1-based page-range spec like "1-3,5,9-10" into a sorted,
@@ -705,6 +788,18 @@ pub fn parse_page_order(spec: &str, total: u32) -> Result<Vec<u32>, PzError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn timecodes_parse() {
+        assert_eq!(parse_timecode("90").unwrap(), 90.0);
+        assert_eq!(parse_timecode("1:30").unwrap(), 90.0);
+        assert_eq!(parse_timecode("01:02:03").unwrap(), 3723.0);
+        assert_eq!(parse_timecode(" 1:30.5 ").unwrap(), 90.5);
+        assert_eq!(parse_timecode("0").unwrap(), 0.0);
+        for bad in ["", "1:2:3:4", "1:75", "abc", "-5", "1.5:00", "2:60"] {
+            assert!(parse_timecode(bad).is_err(), "{bad:?} should be rejected");
+        }
+    }
 
     #[test]
     fn parses_ranges() {
