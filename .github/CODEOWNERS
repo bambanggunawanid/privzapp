@@ -1,0 +1,15 @@
+# Every change needs the maintainer's review.
+#
+# Branch protection requires an approving review from a code owner on
+# pull requests to main. As repository admin the maintainer is exempt
+# (admin enforcement is deliberately off), so their own work merges
+# without waiting for a second pair of eyes — this gate exists for
+# outside contributions.
+* @bambanggunawanid
+
+# Extra emphasis: these encode the product's privacy promises. A change
+# here is a change to what PrivZapp claims about itself.
+/docs/adr/                @bambanggunawanid
+/app/src/pages/privacy.rs @bambanggunawanid
+/deploy/                  @bambanggunawanid
+/.github/                 @bambanggunawanid
