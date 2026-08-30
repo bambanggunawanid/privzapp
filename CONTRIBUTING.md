@@ -99,8 +99,7 @@ test fails the build if the README tools table or CHANGELOG lags the registry
   invariant for anything new that claims to shrink files.
 - **Telemetry schema changes need explicit owner sign-off** — the event
   schema is a privacy contract (enumerable values only, no free-form
-  strings). The dormant pz-telemetry queue sends nothing; the only live
-  collection is the ADR-0012 page counter (path + country, test-pinned).
+  strings). Current builds send nothing at all.
 - **CSP:** production serves a strict Content-Security-Policy from
   `deploy/security-headers.conf`. If your change loads a new kind of
   resource (fonts, workers, media), extend the policy there or it will work

@@ -47,20 +47,6 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
   folder and one match arm in `app/src/icons.rs`.
 
 ### Added
-- **Anonymous visit counting** (ADR-0012): a self-hosted GoatCounter
-  sidecar counts page views — the beacon sends the page path and
-  nothing else, the server stores per-page, per-day counters plus the
-  visit's country, and that's the entire dataset: no IP stored, no
-  device/browser info, no cookies, no visitor IDs, no third party
-  (Google Analytics was rejected — no truthful disclosure could be
-  written for it). On by default with a persistent off toggle on the
-  Privacy page, which now discloses the full sent/stored/not-stored
-  list; the Global Privacy Control and Do-Not-Track browser signals are
-  honored automatically. The footer promise reads "no ads" with a
-  "What we count →" link instead of the no-longer-literal "no
-  tracking". Deploy: docker-compose gains the sidecar (dashboard on
-  127.0.0.1:8091); single-container runs no-op the beacon with a 204
-  stub.
 - **OCR — Image to Text and OCR PDF**: read the text out of pictures,
   screenshots and scanned PDFs, entirely on-device (tesseract-wasm,
   ADR-0011). English and Indonesian models; scanned PDFs are rendered

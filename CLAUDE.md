@@ -17,11 +17,11 @@ crates that compile to both native and wasm32.
   this reason — don't re-enable defaults.
 - **Telemetry schema is a privacy contract.** Adding any field to
   `pz_telemetry::Event` needs explicit user sign-off. No free-form strings.
-  Same for analytics (ADR-0012): the beacon sends the page path ONLY
-  (test-pinned), the GoatCounter sidecar stores path + country ONLY
-  (entrypoint-enforced bitmask). Never add a third-party analytics
-  script; never widen either list without owner sign-off + a Privacy
-  page update — the disclosure there is exhaustive by design.
+  Analytics were built and then deliberately removed (ADR-0012, Reverted):
+  the app sends NO requests of its own. `deploy/goatcounter/` keeps the
+  working sidecar for a possible future paid tier, wired to nothing.
+  Re-introducing any beacon, counter or third-party script needs explicit
+  owner sign-off plus a Privacy page update.
 - **UI copy promises** ("nothing is uploaded", "works offline") are product
   claims — don't add code that makes them false.
 

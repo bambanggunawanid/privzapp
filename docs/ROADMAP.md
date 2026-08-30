@@ -80,14 +80,15 @@ path:
 - ~~**Donation integrations**~~ — done 2026-08-24: `app/src/pages/support.rs`
   links the real Ko-fi (`ko-fi.com/S7F125OT18`) and GitHub Sponsors
   (`github.com/sponsors/bambanggunawanid`) accounts.
-- **Analytics** — shipped 2026-08-30 (ADR-0012): anonymous page counting
-  via a self-hosted GoatCounter sidecar (path + country only, off-switch,
-  GPC honored). Owner actions remaining: set GC_EMAIL/GC_PASSWORD in
-  .env, and put the dashboard (127.0.0.1:8091) behind a subdomain —
-  GoatCounter's "public" site mode can serve as the public stats page.
+- **Analytics**: deliberately not shipped. Built and verified as a
+  self-hosted page counter, then removed the same day (ADR-0012,
+  Reverted) — the data was thin, opt-in would have been strictly worse
+  than nothing, and "we collect nothing" is worth more than a per-country
+  page count. Search Console covers the traffic question for free.
+  `deploy/goatcounter/` keeps the working sidecar, wired to nothing, as a
+  starting point if a paid tier ever needs server-side features.
 - **Opt-in tool telemetry**: the queue still exists (`pz-telemetry`),
-  still dormant, still needs explicit schema sign-off before any wiring —
-  page counting (above) is deliberately separate from per-tool events.
+  still dormant, still needs explicit schema sign-off before any wiring.
 
 ## Explicitly rejected
 

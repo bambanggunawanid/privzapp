@@ -4,7 +4,6 @@
 //! via WebView/WASM on the web. All file processing happens in-process
 //! through `pz-engine`; no bytes ever leave the device.
 
-mod analytics;
 mod engine;
 mod icons;
 mod ocr;
@@ -91,9 +90,6 @@ fn App() -> Element {
 fn Shell() -> Element {
     let mut menu = use_signal(|| false);
     let route = use_route::<Route>();
-    // Shell re-renders on navigation; the beacon dedupes same-path calls,
-    // so counting here catches every page view exactly once (ADR-0012).
-    analytics::page_hit(&route.to_string());
     let in_editor = matches!(&route, Route::ToolPage { slug } if slug == "edit-pdf");
     rsx! {
         header { class: "nav",
@@ -202,8 +198,7 @@ fn Shell() -> Element {
                 Link { to: Route::ToolPage { slug: "zip-files".into() }, "Create ZIP" }
             }
             p { class: "footer-promise",
-                "Your files never leave your device. No uploads, no accounts, no ads. "
-                Link { to: Route::Privacy {}, "What we count →" }
+                "Your files never leave your device. No uploads, no accounts, no tracking."
             }
             p { class: "footer-fine",
                 "PrivZapp is free forever and runs on donations. "

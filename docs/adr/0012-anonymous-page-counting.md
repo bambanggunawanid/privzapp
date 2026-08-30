@@ -1,6 +1,8 @@
 # ADR-0012: Anonymous page counting via self-hosted GoatCounter
 
-- **Status**: Accepted
+- **Status**: Reverted 2026-08-30 (built, verified, then removed by owner
+  decision — the implementation is kept in `deploy/goatcounter/`, wired to
+  nothing, as the starting point for a future paid tier)
 - **Date**: 2026-08-30
 
 ## Context
@@ -81,3 +83,33 @@ matching the owner's stated privacy promise could be written for it.
   sub-country *region* bit — which both broke counting and contradicted
   the disclosure. Re-verify the constants against the source on every
   upgrade; the entrypoint comment lists them.
+
+## Reverted — why
+
+Built, deployed and verified end to end, then removed the same day. The
+data was real but thin: a per-page, per-day counter plus a country, with
+no sessions by design. The decisive arguments:
+
+- **Opt-in would have been strictly worse.** Almost nobody opts in, so
+  you pay the container, the pinned binary, the volume, the dashboard
+  and the disclosure page for no usable data. The honest choice was
+  binary: on by default, or nothing.
+- **The cost was never the container — it was the sentence.** "We
+  collect nothing" is absolute and unarguable, and it is the entire
+  differentiator for this product. "We collect almost nothing, here is a
+  detailed page" is a claim that must be kept true through every future
+  change, forever, for a page counter.
+- **Search Console answers the actual question better.** The owner's
+  goal is ranking against iLovePDF-class sites. Search Console gives
+  impressions, clicks, queries and position per page — free, no
+  client-side code, no privacy cost — and since every tool has its own
+  prerendered landing page, it already shows which tools pull traffic.
+- Privacy-tool audiences block analytics endpoints at an unusually high
+  rate, so the numbers skew low regardless.
+
+Kept for the record because the reasoning (especially the GA rejection
+and the collect-bitmask trap) is worth not rediscovering. If a paid tier
+ever wants server-side features, `deploy/goatcounter/` still builds and
+runs; re-wiring it means restoring the nginx `location = /gc/count`
+block, the beacon module (see git history, commit 60bf108) and the
+disclosure.
