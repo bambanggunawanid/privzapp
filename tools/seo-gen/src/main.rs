@@ -13,6 +13,7 @@ use std::env;
 use std::fs;
 use std::path::Path;
 
+use pz_core::i18n::{self, Locale};
 use pz_core::seo::{seo_for, ToolSeo};
 use pz_core::{ToolMeta, TOOLS};
 
@@ -55,23 +56,40 @@ fn main() {
         1,
     );
 
-    // Tool pages.
+    // Tool pages, once per locale. English keeps the canonical
+    // unprefixed URL; others live under /<code>/.
+    let mut pages = 0usize;
     for tool in TOOLS {
-        let seo = seo_for(tool.slug)
-            .unwrap_or_else(|| panic!("no SEO copy for {} (test should catch this)", tool.slug));
-        let url = format!("{base}/tool/{}", tool.slug);
-        let html = render_page(
-            &template,
-            seo.title,
-            seo.description,
-            &url,
-            &base,
-            &tool_head_extras(seo, &url, &base),
-            &tool_body(tool, seo),
-        );
-        let dir = out.join("tool").join(tool.slug);
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("index.html"), html).unwrap();
+        for &loc in Locale::ALL {
+            let seo = pz_core::seo::seo_for_locale(tool.slug, loc).unwrap_or_else(|| {
+                panic!("no SEO copy for {} (test should catch this)", tool.slug)
+            });
+            let path = format!("/tool/{}", tool.slug);
+            let url = format!("{base}{}{path}", loc.prefix());
+            let html = render_page(
+                &template,
+                &base,
+                Page {
+                    lang: loc,
+                    title: seo.title,
+                    description: seo.description,
+                    canonical: &url,
+                    head_extra: &format!(
+                        "{}{}",
+                        tool_head_extras(&seo, &url, &base),
+                        alternates(&path, &base)
+                    ),
+                    body: &tool_body(tool, &seo, loc),
+                },
+            );
+            let dir = out
+                .join(loc.prefix().trim_start_matches('/'))
+                .join("tool")
+                .join(tool.slug);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("index.html"), html).unwrap();
+            pages += 1;
+        }
     }
 
     // Home.
@@ -84,16 +102,25 @@ fn main() {
         "url": format!("{base}/"),
         "description": home_desc,
     });
-    let home_html = render_page(
-        &template,
-        home_title,
-        home_desc,
-        &format!("{base}/"),
-        &base,
-        &jsonld_tag(&home_jsonld),
-        &home_body(),
-    );
-    fs::write(out.join("index.html"), home_html).unwrap();
+    for &loc in Locale::ALL {
+        let (title, desc) = i18n::site_page_seo(loc, "home", home_title, home_desc);
+        let home_html = render_page(
+            &template,
+            &base,
+            Page {
+                lang: loc,
+                title,
+                description: desc,
+                canonical: &format!("{base}{}/", loc.prefix()),
+                head_extra: &format!("{}{}", jsonld_tag(&home_jsonld), alternates("/", &base)),
+                body: &home_body(loc),
+            },
+        );
+        let dir = out.join(loc.prefix().trim_start_matches('/'));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("index.html"), home_html).unwrap();
+        pages += 1;
+    }
 
     // Secondary pages.
     for (route, title, desc) in [
@@ -108,30 +135,42 @@ fn main() {
             "PrivZapp is free forever with no ads and no premium tier. If it saved you time, donations keep the tools alive for everyone.",
         ),
     ] {
-        let url = format!("{base}/{route}");
-        let html = render_page(
-            &template,
-            title,
-            desc,
-            &url,
-            &base,
-            "",
-            &format!(
-                r#"<h1>{title}</h1><p>{desc}</p><p><a href="/">← All PrivZapp tools</a></p>"#
-            ),
-        );
-        let dir = out.join(route);
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("index.html"), html).unwrap();
+        for &loc in Locale::ALL {
+            let (title, desc) = i18n::site_page_seo(loc, route, title, desc);
+            let path = format!("/{route}");
+            let url = format!("{base}{}{path}", loc.prefix());
+            let back = i18n::t(loc, "All PrivZapp tools →");
+            let html = render_page(
+                &template,
+                &base,
+                Page {
+                    lang: loc,
+                    title,
+                    description: desc,
+                    canonical: &url,
+                    head_extra: &alternates(&path, &base),
+                    body: &format!(
+                        r#"<h1>{title}</h1><p>{desc}</p><p><a href="{}/">← {back}</a></p>"#,
+                        loc.prefix()
+                    ),
+                },
+            );
+            let dir = out.join(loc.prefix().trim_start_matches('/')).join(route);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("index.html"), html).unwrap();
+            pages += 1;
+        }
     }
 
     // sitemap.xml + robots.txt.
-    let mut urls = vec![
-        format!("{base}/"),
-        format!("{base}/privacy"),
-        format!("{base}/support"),
-    ];
-    urls.extend(TOOLS.iter().map(|t| format!("{base}/tool/{}", t.slug)));
+    let mut urls = Vec::new();
+    for &loc in Locale::ALL {
+        let p = loc.prefix();
+        urls.push(format!("{base}{p}/"));
+        urls.push(format!("{base}{p}/privacy"));
+        urls.push(format!("{base}{p}/support"));
+        urls.extend(TOOLS.iter().map(|t| format!("{base}{p}/tool/{}", t.slug)));
+    }
     let sitemap = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n{}</urlset>\n",
         urls.iter()
@@ -183,21 +222,61 @@ fn main() {
     fs::write(out.join("llms.txt"), llms).unwrap();
 
     println!(
-        "seo-gen: {} tool pages + home, privacy, support, sitemap.xml, robots.txt, llms.txt ({base})",
-        TOOLS.len()
+        "seo-gen: {pages} pages across {} locales + sitemap.xml, robots.txt, llms.txt ({base})",
+        Locale::ALL.len()
     );
 }
 
 /// Inject head tags and body content into the dx template.
-fn render_page(
-    template: &str,
-    title: &str,
-    description: &str,
-    canonical: &str,
-    base: &str,
-    head_extra: &str,
-    body: &str,
-) -> String {
+/// `path` is the locale-independent path ("/", "/privacy",
+/// "/tool/merge-pdf"); the alternates are derived from it, so every
+/// translation of a page points at every other one plus x-default.
+fn alternates(path: &str, base: &str) -> String {
+    // Each href must be byte-identical to that page's own canonical or
+    // Google may drop the annotation — hence the trailing slash on home.
+    let href = |loc: Locale| {
+        if path == "/" {
+            format!("{base}{}/", loc.prefix())
+        } else {
+            format!("{base}{}{path}", loc.prefix())
+        }
+    };
+    let mut s = String::new();
+    for &loc in Locale::ALL {
+        s.push_str(&format!(
+            r#"<link rel="alternate" hreflang="{}" href="{}">"#,
+            loc.code(),
+            href(loc),
+        ));
+    }
+    // x-default is where a search engine sends a user whose language we
+    // don't publish: the English page.
+    s.push_str(&format!(
+        r#"<link rel="alternate" hreflang="x-default" href="{}">"#,
+        href(Locale::En),
+    ));
+    s
+}
+
+/// Everything that varies between the pages seo-gen writes.
+struct Page<'a> {
+    lang: Locale,
+    title: &'a str,
+    description: &'a str,
+    canonical: &'a str,
+    head_extra: &'a str,
+    body: &'a str,
+}
+
+fn render_page(template: &str, base: &str, page: Page<'_>) -> String {
+    let Page {
+        lang,
+        title,
+        description,
+        canonical,
+        head_extra,
+        body,
+    } = page;
     let head = format!(
         concat!(
             r#"<meta name="description" content="{d}">"#,
@@ -216,7 +295,7 @@ fn render_page(
         b = base,
     );
     template
-        .replacen("<html>", r#"<html lang="en">"#, 1)
+        .replacen("<html>", &format!(r#"<html lang="{}">"#, lang.code()), 1)
         .replacen(
             &format!(
                 "<title>{}</title>",
@@ -262,68 +341,109 @@ fn tool_head_extras(seo: &ToolSeo, url: &str, base: &str) -> String {
     format!("{}{}", jsonld_tag(&app), jsonld_tag(&faq))
 }
 
-fn tool_body(tool: &ToolMeta, seo: &ToolSeo) -> String {
+fn tool_body(tool: &ToolMeta, seo: &ToolSeo, loc: Locale) -> String {
     let mut s = String::new();
-    s.push_str(r#"<nav><a href="/">PrivZapp</a> — free, private file tools</nav>"#);
-    s.push_str(&format!("<h1>{} {}</h1>", tool.icon, esc(tool.name)));
-    s.push_str(&format!("<p><strong>{}</strong></p>", esc(tool.tagline)));
+    s.push_str(&format!(
+        r#"<nav><a href="{}/">PrivZapp</a> — {}</nav>"#,
+        loc.prefix(),
+        i18n::t(loc, "free, private file tools")
+    ));
+    s.push_str(&format!(
+        "<h1>{} {}</h1>",
+        tool.icon,
+        esc(i18n::tool_name(tool, loc))
+    ));
+    s.push_str(&format!(
+        "<p><strong>{}</strong></p>",
+        esc(i18n::tool_tagline(tool, loc))
+    ));
     s.push_str(&format!("<p>{}</p>", esc(seo.description)));
-    s.push_str(
-        "<p>Free forever. No account, no watermark, no file size games — and your \
-         files are processed on your device, never uploaded.</p>",
-    );
-    s.push_str("<h2>Frequently asked questions</h2>");
+    s.push_str(&format!(
+        "<p>{}</p>",
+        i18n::t(
+            loc,
+            "Free forever. No account, no watermark, no file size games — and your files are processed on your device, never uploaded."
+        )
+    ));
+    s.push_str(&format!(
+        "<h2>{}</h2>",
+        i18n::t(loc, "Frequently asked questions")
+    ));
     for (q, a) in seo.faq {
         s.push_str(&format!("<h3>{}</h3><p>{}</p>", esc(q), esc(a)));
     }
     s.push_str(&format!(
-        "<h2>More free {} tools</h2><ul>",
-        tool.category.label()
+        "<h2>{}</h2><ul>",
+        i18n::t(loc, &format!("More free {} tools", tool.category.label()))
     ));
     for other in TOOLS
         .iter()
         .filter(|t| t.category == tool.category && t.slug != tool.slug)
     {
         s.push_str(&format!(
-            r#"<li><a href="/tool/{}">{}</a> — {}</li>"#,
+            r#"<li><a href="{}/tool/{}">{}</a> — {}</li>"#,
+            loc.prefix(),
             other.slug,
-            esc(other.name),
-            esc(other.tagline)
+            esc(i18n::tool_name(other, loc)),
+            esc(i18n::tool_tagline(other, loc))
         ));
     }
     s.push_str("</ul>");
-    s.push_str(r#"<p><a href="/">All PrivZapp tools →</a></p>"#);
+    s.push_str(&format!(
+        r#"<p><a href="{}/">{}</a></p>"#,
+        loc.prefix(),
+        i18n::t(loc, "All PrivZapp tools →")
+    ));
     s
 }
 
-fn home_body() -> String {
+fn home_body(loc: Locale) -> String {
     let mut s = String::new();
-    s.push_str("<h1>Every file tool. Zero uploads.</h1>");
-    s.push_str(
-        "<p>Merge PDFs, compress images, convert formats, zip files — free and \
-         processed entirely on your device with WebAssembly. Nothing is ever sent \
-         to a server, so nothing can ever leak.</p>",
-    );
-    for cat in [
-        pz_core::ToolCategory::Pdf,
-        pz_core::ToolCategory::Image,
-        pz_core::ToolCategory::Archive,
-        pz_core::ToolCategory::Security,
-    ] {
-        s.push_str(&format!("<h2>{} tools</h2><ul>", cat.label()));
-        for tool in TOOLS.iter().filter(|t| t.category == cat) {
+    s.push_str(&format!(
+        "<h1>{}{}</h1>",
+        i18n::t(loc, "Every file tool. "),
+        i18n::t(loc, "Zero uploads.")
+    ));
+    s.push_str(&format!(
+        "<p>{}</p>",
+        i18n::t(
+            loc,
+            "Merge PDFs, compress images, convert formats, zip files — free and processed entirely on your device with WebAssembly. Nothing is ever sent to a server, so nothing can ever leak."
+        )
+    ));
+    // Every category, derived from the registry rather than listed by
+    // hand — the hand-written list silently omitted Video when that
+    // category was added, so the prerendered home page never linked the
+    // video tools at all.
+    let mut seen: Vec<&str> = Vec::new();
+    for tool in TOOLS {
+        let label = tool.category.label();
+        if seen.contains(&label) {
+            continue;
+        }
+        seen.push(label);
+        // Full phrase: Indonesian word order is "Alat PDF", not "PDF alat".
+        s.push_str(&format!(
+            "<h2>{}</h2><ul>",
+            i18n::t(loc, &format!("{label} tools"))
+        ));
+        for t in TOOLS.iter().filter(|t| t.category == tool.category) {
             s.push_str(&format!(
-                r#"<li><a href="/tool/{}">{}</a> — {}</li>"#,
-                tool.slug,
-                esc(tool.name),
-                esc(tool.tagline)
+                r#"<li><a href="{}/tool/{}">{}</a> — {}</li>"#,
+                loc.prefix(),
+                t.slug,
+                esc(i18n::tool_name(t, loc)),
+                esc(i18n::tool_tagline(t, loc))
             ));
         }
         s.push_str("</ul>");
     }
-    s.push_str(
-        r#"<p><a href="/privacy">Privacy</a> · <a href="/support">Support PrivZapp</a></p>"#,
-    );
+    s.push_str(&format!(
+        r#"<p><a href="{p}/privacy">{}</a> · <a href="{p}/support">{}</a></p>"#,
+        i18n::t(loc, "Privacy"),
+        i18n::t(loc, "Support PrivZapp"),
+        p = loc.prefix(),
+    ));
     s
 }
 

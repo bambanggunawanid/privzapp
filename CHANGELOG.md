@@ -14,6 +14,10 @@ editor workspace, the video and OCR tool families, folder drag-and-drop,
 editor autosave — and, deliberately, no telemetry.
 
 ### Fixed
+- The prerendered home page never linked any video tool: `seo-gen`
+  listed categories by hand and was not updated when Video was added.
+  It now derives them from the registry, so a new category can't be
+  forgotten again.
 - Local release builds no longer accumulate every previous build. `dx`
   never cleans its output directory, so each build left another hashed
   copy of the ~4 MB app wasm in `assets/`; 54 had piled up, taking the
@@ -63,6 +67,16 @@ editor autosave — and, deliberately, no telemetry.
   folder and one match arm in `app/src/icons.rs`.
 
 ### Added
+- **PrivZapp speaks Indonesian, and it is built to rank** (ADR-0014).
+  English keeps its canonical unprefixed URLs; Indonesian lives under
+  `/id/` — 82 prerendered pages across both, each with `<html lang>`, a
+  self-referencing canonical, reciprocal `hreflang` (plus `x-default`)
+  and a sitemap covering every locale. Tool names, taglines, the UI, and
+  the complete SEO copy including all 118 FAQ pairs are translated. A
+  language switcher sits in the nav; it navigates to the mirrored URL
+  rather than swapping strings in place, so crawlers can follow it.
+  Adding another language is data, not code: one `Locale` variant plus
+  rows in three tables — routing costs nothing extra.
 - **The PDF editor survives a refresh.** It autosaves the working
   document to your browser's storage, encrypted with AES-256 and with
   the key held separately, then offers it back by name when you return —

@@ -19,6 +19,14 @@ That's a privacy tax nobody should pay for rotating a PDF. PrivZapp does the
 same jobs at native speed, offline-capable, and free forever — funded by
 donations, not by your data.
 
+## Languages
+
+English and Indonesian (`/id/`), with per-language URLs, `hreflang` and
+prerendered landing pages — see
+[ADR-0014](docs/adr/0014-i18n-and-localized-seo.md). Adding a language is
+data, not code: a `Locale` variant plus rows in three tables in
+`crates/pz-core/src/i18n*.rs`.
+
 ## Principles
 
 1. **Files never leave the device.** All processing is local (WASM/native).

@@ -18,6 +18,38 @@ pub struct ToolSeo {
     pub faq: &'static [(&'static str, &'static str)],
 }
 
+include!("i18n_seo_id.rs");
+
+/// The SEO copy for `slug` in `locale`. English is the source; other
+/// locales fall back to it entry by entry, so a half-translated catalog
+/// still renders a complete page.
+pub fn seo_for_locale(slug: &str, locale: crate::i18n::Locale) -> Option<ToolSeo> {
+    let en = seo_for(slug)?;
+    if locale.is_default() {
+        return Some(ToolSeo {
+            slug: en.slug,
+            title: en.title,
+            description: en.description,
+            faq: en.faq,
+        });
+    }
+    let localized = SEO_ID.iter().find(|(s, _, _, _)| *s == slug);
+    Some(match localized {
+        Some((_, title, description, faq)) => ToolSeo {
+            slug: en.slug,
+            title,
+            description,
+            faq,
+        },
+        None => ToolSeo {
+            slug: en.slug,
+            title: en.title,
+            description: en.description,
+            faq: en.faq,
+        },
+    })
+}
+
 pub const TOOL_SEO: &[ToolSeo] = &[
     ToolSeo {
         slug: "edit-pdf",
@@ -783,6 +815,50 @@ mod tests {
                 crate::tool_by_slug(seo.slug).is_some(),
                 "SEO entry \"{}\" has no matching tool",
                 seo.slug
+            );
+        }
+    }
+
+    #[test]
+    fn translated_copy_is_complete_and_fits_too() {
+        use crate::i18n::Locale;
+        for tool in TOOLS {
+            for &loc in Locale::ALL {
+                let seo = seo_for_locale(tool.slug, loc)
+                    .unwrap_or_else(|| panic!("no SEO for {} in {loc}", tool.slug));
+                let t = seo.title.chars().count();
+                let d = seo.description.chars().count();
+                assert!(
+                    (25..=65).contains(&t),
+                    "{} [{loc}]: title is {t} chars",
+                    tool.slug
+                );
+                assert!(
+                    (80..=165).contains(&d),
+                    "{} [{loc}]: description is {d} chars",
+                    tool.slug
+                );
+                assert!(
+                    seo.faq.len() >= 2,
+                    "{} [{loc}]: needs 2+ FAQ entries",
+                    tool.slug
+                );
+                assert!(seo.title.contains("PrivZapp"));
+            }
+            // A translated page must not silently serve English copy:
+            // a mixed-language page ranks worse than either language.
+            let id = seo_for_locale(tool.slug, Locale::Id).unwrap();
+            let en = seo_for_locale(tool.slug, Locale::En).unwrap();
+            assert_ne!(
+                id.title, en.title,
+                "tool \"{}\" has no Indonesian SEO entry",
+                tool.slug
+            );
+            assert_eq!(
+                id.faq.len(),
+                en.faq.len(),
+                "tool \"{}\": Indonesian FAQ count differs from English",
+                tool.slug
             );
         }
     }

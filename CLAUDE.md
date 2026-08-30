@@ -94,9 +94,16 @@ crates that compile to both native and wasm32.
 - Container: `docker compose up -d --build` (also Portainer/podman-compatible).
   Runtime image is nginx serving the static bundle — keep it that way; a
   server that processes files would violate the core promise.
+- i18n (ADR-0014): `crates/pz-core/src/i18n.rs` + `i18n_id.rs` +
+  `i18n_seo_id.rs`. UI strings are keyed by their ENGLISH text
+  (`tr("...")` in the app, `i18n::t(loc, "...")` elsewhere), so editing an
+  English string silently orphans its translation — update both. English
+  is unprefixed and `Locale::from_str` must NEVER accept a route name
+  ("tool"/"privacy"/"support") or every tool page 404s; tests pin that.
+  Adding a language = a `Locale` variant + rows in the three tables.
 - SEO: per-tool copy (titles/descriptions/FAQs) lives in
   `crates/pz-core/src/seo.rs` and is test-enforced (every tool needs an
-  entry; snippet length limits). `tools/seo-gen` prerenders all routes
+  entry; snippet length limits, applied to every locale). `tools/seo-gen` prerenders all routes
   during `scripts/build-web.sh`; `BASE_URL` env sets canonical origin.
   Adding a tool now also means writing its `ToolSeo` entry (ADR-0006).
 - Desktop build needs webkit2gtk + gtk3 dev packages on Linux (not installed

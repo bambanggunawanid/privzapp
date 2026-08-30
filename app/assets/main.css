@@ -113,7 +113,11 @@ a:hover { text-decoration: underline; }
 
 /* Quick tool links (wide screens) + the all-tools mega menu. */
 .nav-quick { display: none; }
-@media (min-width: 960px) { .nav-quick { display: inline; } }
+/* 1280, not 960: at 960-1200 the quick links pushed the nav past the
+   viewport — in English already, and worse in languages with longer
+   words (measured: English overflowed to 1183px, Indonesian to 1255px).
+   Only show them when the widest language still fits. */
+@media (min-width: 1280px) { .nav-quick { display: inline; } }
 .nav-alltools {
   font: inherit;
   font-size: 0.9rem;
@@ -143,9 +147,10 @@ a:hover { text-decoration: underline; }
   .support-cta { padding: 6px 10px; }
   .support-glyph { font-size: 1.05rem; line-height: 1; }
 }
-@media (max-width: 380px) {
-  /* Last resort before the chips start colliding: the logo carries the
-     brand on its own. */
+/* The language switcher costs real width, so on phones the logo carries
+   the brand on its own — a wordmark is the cheapest 90px to reclaim, and
+   the logo is unambiguous. Raised from 380px when i18n landed. */
+@media (max-width: 700px) {
   .brand-name { display: none; }
 }
 
@@ -1108,3 +1113,24 @@ button.ghost:hover { color: var(--text); border-color: var(--muted); }
 .ed-restore p { margin: 0 0 10px; }
 .ed-restore-actions { display: flex; gap: 8px; margin-bottom: 8px; }
 .ed-restore .muted.small { margin: 0; }
+
+/* Language switcher (ADR-0014): plain links so a crawler can follow
+   them and the current locale is always visible in the URL. */
+.lang-switch { display: inline-flex; gap: 2px; }
+.lang-opt {
+  color: var(--muted) !important;
+  border: 1px solid var(--line);
+  padding: 5px 9px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+.lang-opt:first-child { border-radius: 999px 0 0 999px; }
+.lang-opt:last-child { border-radius: 0 999px 999px 0; }
+.lang-opt:hover { color: var(--text) !important; text-decoration: none; }
+.lang-opt.active {
+  color: var(--text) !important;
+  border-color: var(--accent);
+  background: rgba(108, 140, 255, 0.14);
+}
+@media (max-width: 700px) { .lang-opt { padding: 5px 7px; font-size: 0.72rem; } }

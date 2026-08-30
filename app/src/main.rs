@@ -16,6 +16,7 @@ mod video;
 use dioxus::prelude::*;
 
 use pages::{Home, Privacy, Support, ToolPage};
+use pz_core::i18n::Locale;
 
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 // Derived from app/brand/logo-master.png by scripts/gen-icons.py.
@@ -36,6 +37,92 @@ pub enum Route {
         Privacy {},
         #[route("/support")]
         Support {},
+        // English keeps the canonical, unprefixed URLs; every other
+        // locale lives under its code. `Locale: FromStr` rejects "tool",
+        // "privacy" and "support", so these can never shadow the routes
+        // above (pinned by a pz-core test).
+        #[nest("/:lang")]
+            #[route("/")]
+            LocaleHome { lang: Locale },
+            #[route("/tool/:slug")]
+            LocaleToolPage { lang: Locale, slug: String },
+            #[route("/privacy")]
+            LocalePrivacy { lang: Locale },
+            #[route("/support")]
+            LocaleSupport { lang: Locale },
+        // No #[end_nest]: the nest runs to the end of the enum, and the
+        // macro rejects a trailing attribute with no variant after it.
+}
+
+impl Route {
+    /// The same page in another locale — what the language switcher and
+    /// the `hreflang` tags need.
+    pub fn in_locale(&self, lang: Locale) -> Route {
+        let slug = match self {
+            Route::ToolPage { slug } | Route::LocaleToolPage { slug, .. } => Some(slug.clone()),
+            _ => None,
+        };
+        let privacy = matches!(self, Route::Privacy {} | Route::LocalePrivacy { .. });
+        let support = matches!(self, Route::Support {} | Route::LocaleSupport { .. });
+        match (lang.is_default(), slug, privacy, support) {
+            (true, Some(slug), _, _) => Route::ToolPage { slug },
+            (true, None, true, _) => Route::Privacy {},
+            (true, None, _, true) => Route::Support {},
+            (true, None, _, _) => Route::Home {},
+            (false, Some(slug), _, _) => Route::LocaleToolPage { lang, slug },
+            (false, None, true, _) => Route::LocalePrivacy { lang },
+            (false, None, _, true) => Route::LocaleSupport { lang },
+            (false, None, _, _) => Route::LocaleHome { lang },
+        }
+    }
+
+    /// Which language this URL is in.
+    pub fn locale(&self) -> Locale {
+        match self {
+            Route::LocaleHome { lang }
+            | Route::LocalePrivacy { lang }
+            | Route::LocaleSupport { lang }
+            | Route::LocaleToolPage { lang, .. } => *lang,
+            _ => Locale::En,
+        }
+    }
+}
+
+/// The locale of the page being rendered. Usable from any component
+/// under the router; pages call this instead of threading a parameter.
+pub fn current_locale() -> Locale {
+    use_route::<Route>().locale()
+}
+
+/// Shorthand for translating a UI string into the current locale.
+pub fn tr(en: &str) -> String {
+    pz_core::i18n::t(current_locale(), en).to_string()
+}
+
+// The locale-prefixed variants render exactly the same pages; the
+// locale comes from the route, so these are one-liners.
+#[component]
+fn LocaleHome(lang: Locale) -> Element {
+    let _ = lang;
+    rsx! { Home {} }
+}
+
+#[component]
+fn LocaleToolPage(lang: Locale, slug: String) -> Element {
+    let _ = lang;
+    rsx! { ToolPage { slug } }
+}
+
+#[component]
+fn LocalePrivacy(lang: Locale) -> Element {
+    let _ = lang;
+    rsx! { Privacy {} }
+}
+
+#[component]
+fn LocaleSupport(lang: Locale) -> Element {
+    let _ = lang;
+    rsx! { Support {} }
 }
 
 fn main() {
@@ -94,22 +181,27 @@ fn Shell() -> Element {
     let in_editor = matches!(&route, Route::ToolPage { slug } if slug == "edit-pdf");
     rsx! {
         header { class: "nav",
-            Link { class: "brand", to: Route::Home {},
+            Link { class: "brand", to: route.in_locale(route.locale()),
                 img { class: "brand-logo", src: LOGO_NAV, alt: "PrivZapp" }
                 span { class: "brand-name", "PrivZapp" }
             }
             nav { class: "nav-links",
-                Link { class: "nav-quick", to: Route::ToolPage { slug: "merge-pdf".into() }, "Merge PDF" }
-                Link { class: "nav-quick", to: Route::ToolPage { slug: "compress-pdf".into() }, "Compress PDF" }
-                Link { class: "nav-quick", to: Route::ToolPage { slug: "edit-pdf".into() }, "Edit PDF" }
-                Link { class: "nav-quick", to: Route::ToolPage { slug: "compress-img".into() }, "Compress Image" }
+                // Quick links carry the current locale, and show the
+                // tool's name in that language.
+                for slug in ["merge-pdf", "compress-pdf", "edit-pdf", "compress-img"] {
+                    Link {
+                        class: "nav-quick",
+                        to: Route::ToolPage { slug: slug.to_string() }.in_locale(route.locale()),
+                        {pz_core::tool_by_slug(slug).map(|m| pz_core::i18n::tool_name(m, route.locale())).unwrap_or(slug)}
+                    }
+                }
                 // Narrow screens drop the wordings and keep the glyphs:
                 // four chips' worth of labels overflow a phone nav bar.
                 button {
                     class: if menu() { "nav-alltools open" } else { "nav-alltools" },
                     onclick: move |_| menu.set(!menu()),
-                    title: "All tools",
-                    aria_label: "All tools",
+                    title: tr("All tools"),
+                    aria_label: tr("All tools"),
                     svg {
                         class: "nav-alltools-glyph",
                         view_box: "0 0 16 16",
@@ -121,10 +213,10 @@ fn Shell() -> Element {
                         rect { x: "1", y: "9", width: "6", height: "6", rx: "1.6", fill: "currentColor" }
                         rect { x: "9", y: "9", width: "6", height: "6", rx: "1.6", fill: "currentColor" }
                     }
-                    span { class: "nav-alltools-label", "All tools" }
+                    span { class: "nav-alltools-label", {tr("All tools")} }
                     span { class: "ed-caret", {if menu() { "▴" } else { "▾" }} }
                 }
-                Link { to: Route::Privacy {}, "Privacy" }
+                Link { to: Route::Privacy {}.in_locale(route.locale()), {tr("Privacy")} }
                 // Plain outbound link — deliberately NO live star-count
                 // badge: that would phone home (CSP: connect-src 'self').
                 a {
@@ -144,16 +236,30 @@ fn Shell() -> Element {
                             fill: "currentColor",
                         }
                     }
-                    span { class: "gh-star-label", "Star" }
+                    span { class: "gh-star-label", {tr("Star")} }
                     span { class: "gh-star-glyph", "★" }
+                }
+                // Language switcher: plain links to the same page in each
+                // locale, so switching is a real navigation a crawler can
+                // follow (and the URL always says which language you are on).
+                div { class: "lang-switch",
+                    for loc in Locale::ALL.iter().copied() {
+                        Link {
+                            class: if route.locale() == loc { "lang-opt active" } else { "lang-opt" },
+                            to: route.in_locale(loc),
+                            lang: loc.code(),
+                            title: "{loc.endonym()}",
+                            {loc.code().to_uppercase()}
+                        }
+                    }
                 }
                 Link {
                     class: "support-cta",
                     to: Route::Support {},
-                    title: "Support us",
-                    aria_label: "Support us",
+                    title: tr("Support us"),
+                    aria_label: tr("Support us"),
                     span { class: "support-glyph", "♥" }
-                    span { class: "support-label", "Support us" }
+                    span { class: "support-label", {tr("Support us")} }
                 }
             }
         }
@@ -199,12 +305,12 @@ fn Shell() -> Element {
                 Link { to: Route::ToolPage { slug: "zip-files".into() }, "Create ZIP" }
             }
             p { class: "footer-promise",
-                "Your files never leave your device. No uploads, no accounts, no tracking."
+                {tr("Your files never leave your device. No uploads, no accounts, no tracking.")}
             }
             p { class: "footer-fine",
-                "PrivZapp is free forever and runs on donations. "
-                Link { to: Route::Support {}, "Keep it alive →" }
-                " · Open source: "
+                {tr("PrivZapp is free forever and runs on donations. ")}
+                Link { to: Route::Support {}.in_locale(route.locale()), {tr("Keep it alive →")} }
+                {tr(" · Open source: ")}
                 a {
                     href: "https://github.com/bambanggunawanid/privzapp",
                     target: "_blank",

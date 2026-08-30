@@ -10,8 +10,10 @@ use pz_core::{
 };
 use pz_img::TARGET_FORMATS;
 
+use pz_core::i18n;
+
 use crate::save::save_file;
-use crate::Route;
+use crate::{current_locale, tr, Route};
 
 const DROPDIR_JS: Asset = asset!("/assets/dropdir.js");
 
@@ -40,12 +42,13 @@ pub fn ToolPage(slug: String) -> Element {
     let Some(meta) = tool_by_slug(&slug) else {
         return rsx! {
             section { class: "panel",
-                h1 { "Tool not found" }
-                p { "That tool doesn't exist (yet?)." }
+                h1 { {tr("Tool not found")} }
+                p { {tr("That tool doesn't exist (yet?).")} }
             }
         };
     };
 
+    let loc = current_locale();
     let mut files = use_signal(Vec::<InputFile>::new);
     let mut outputs = use_signal(Vec::<OutputFile>::new);
     let mut error = use_signal(String::new);
@@ -348,8 +351,8 @@ pub fn ToolPage(slug: String) -> Element {
                 div { class: "tool-icon big", {meta.icon} }
             }
             div {
-                h1 { {meta.name} }
-                p { class: "muted", {meta.tagline} }
+                h1 { {i18n::tool_name(&meta, loc)} }
+                p { class: "muted", {i18n::tool_tagline(&meta, loc)} }
             }
         }
 
@@ -385,8 +388,8 @@ pub fn ToolPage(slug: String) -> Element {
                 },
                 span { class: "dz-icon", "⬆" }
                 span { class: "dz-label",
-                    if meta.multi { "Drop files or a folder here — or click to choose" }
-                    else { "Drop a file here or click to choose" }
+                    if meta.multi { {tr("Drop files or a folder here — or click to choose")} }
+                    else { {tr("Drop a file here or click to choose")} }
                 }
                 span { class: "dz-hint", "Files stay on this device — always." }
             }
@@ -563,7 +566,7 @@ pub fn ToolPage(slug: String) -> Element {
                             },
                             OptionKind::Dimensions => rsx! {
                                 div { class: "opt",
-                                    label { "Size (leave one empty to keep aspect ratio)" }
+                                    label { {tr("Size (leave one empty to keep aspect ratio)")} }
                                     div { class: "dim-row",
                                         input {
                                             r#type: "number",
@@ -585,7 +588,7 @@ pub fn ToolPage(slug: String) -> Element {
                             },
                             OptionKind::TargetFormat => rsx! {
                                 div { class: "opt",
-                                    label { "Convert to" }
+                                    label { {tr("Convert to")} }
                                     select {
                                         aria_label: "Convert to format",
                                         value: "{format}",
@@ -601,7 +604,7 @@ pub fn ToolPage(slug: String) -> Element {
                             },
                             OptionKind::PageRange => rsx! {
                                 div { class: "opt",
-                                    label { "Pages (e.g. 1-3,5 — empty = every page, each as its own file)" }
+                                    label { {tr("Pages (e.g. 1-3,5 — empty = every page, each as its own file)")} }
                                     input {
                                         r#type: "text",
                                         placeholder: "1-3,5",
@@ -743,7 +746,7 @@ pub fn ToolPage(slug: String) -> Element {
                             },
                             OptionKind::ScaleFactor => rsx! {
                                 div { class: "opt",
-                                    label { "Upscale factor" }
+                                    label { {tr("Upscale factor")} }
                                     select {
                                         aria_label: "Upscale factor",
                                         onchange: move |evt| {
@@ -757,7 +760,7 @@ pub fn ToolPage(slug: String) -> Element {
                             },
                             OptionKind::RasterFormat => rsx! {
                                 div { class: "opt",
-                                    label { "Image format" }
+                                    label { {tr("Image format")} }
                                     select {
                                         aria_label: "Image format",
                                         value: "{format}",
@@ -770,7 +773,7 @@ pub fn ToolPage(slug: String) -> Element {
                             },
                             OptionKind::RenderScale => rsx! {
                                 div { class: "opt",
-                                    label { "Resolution" }
+                                    label { {tr("Resolution")} }
                                     select {
                                         aria_label: "Resolution",
                                         onchange: move |evt| scale.set(evt.value().parse().unwrap_or(2)),
@@ -783,7 +786,7 @@ pub fn ToolPage(slug: String) -> Element {
                             },
                             OptionKind::VideoFormat => rsx! {
                                 div { class: "opt",
-                                    label { "Convert to" }
+                                    label { {tr("Convert to")} }
                                     select {
                                         aria_label: "Convert to format",
                                         onchange: move |evt| video_format.set(evt.value()),
@@ -797,7 +800,7 @@ pub fn ToolPage(slug: String) -> Element {
                             },
                             OptionKind::AudioFormat => rsx! {
                                 div { class: "opt",
-                                    label { "Audio format" }
+                                    label { {tr("Audio format")} }
                                     select {
                                         aria_label: "Audio format",
                                         onchange: move |evt| audio_format.set(evt.value()),
@@ -810,7 +813,7 @@ pub fn ToolPage(slug: String) -> Element {
                             },
                             OptionKind::OcrLanguage => rsx! {
                                 div { class: "opt",
-                                    label { "Language" }
+                                    label { {tr("Language")} }
                                     select {
                                         aria_label: "Recognition language",
                                         onchange: move |evt| lang.set(evt.value()),
@@ -821,7 +824,7 @@ pub fn ToolPage(slug: String) -> Element {
                             },
                             OptionKind::Fps => rsx! {
                                 div { class: "opt",
-                                    label { "Frame rate" }
+                                    label { {tr("Frame rate")} }
                                     select {
                                         aria_label: "Frame rate",
                                         onchange: move |evt| fps.set(evt.value().parse().unwrap_or(12)),
@@ -835,7 +838,7 @@ pub fn ToolPage(slug: String) -> Element {
                             },
                             OptionKind::TimeRange => rsx! {
                                 div { class: "opt",
-                                    label { "Start (e.g. 0:05 — empty = from the beginning)" }
+                                    label { {tr("Start (e.g. 0:05 — empty = from the beginning)")} }
                                     input {
                                         r#type: "text",
                                         aria_label: "Start time",
@@ -845,7 +848,7 @@ pub fn ToolPage(slug: String) -> Element {
                                     }
                                 }
                                 div { class: "opt",
-                                    label { "End (e.g. 0:15 — empty = to the end)" }
+                                    label { {tr("End (e.g. 0:15 — empty = to the end)")} }
                                     input {
                                         r#type: "text",
                                         aria_label: "End time",
@@ -922,7 +925,7 @@ pub fn ToolPage(slug: String) -> Element {
                     class: "primary",
                     disabled: busy() || files.read().len() < meta.min_files,
                     onclick: run,
-                    if busy() { "Working…" } else { {meta.name} }
+                    if busy() { {tr("Working…")} } else { {meta.name} }
                 }
                 if !files.read().is_empty() {
                     button {
@@ -953,7 +956,7 @@ pub fn ToolPage(slug: String) -> Element {
 
         if !outputs.read().is_empty() {
             section { class: "panel results",
-                h2 { "Done ✅" }
+                h2 { {tr("Done ✅")} }
                 ul { class: "file-list",
                     for out in outputs() {
                         li { key: "{out.name}",
@@ -1001,7 +1004,7 @@ pub fn ToolPage(slug: String) -> Element {
                                 {other.icon}
                                 " "
                             }
-                            {other.name}
+                            {i18n::tool_name(other, loc)}
                         }
                     }
                 }

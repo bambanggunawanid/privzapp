@@ -84,6 +84,25 @@ and how it behaves with a real, large document.
       unread. To check without waiting, edit the record's `savedAt` in
       devtools → Application → IndexedDB → `pz-editor`.
 
+## 2b. Indonesian copy — native review  *(ADR-0014)*
+
+**Why not automated:** no test can judge whether a translation reads
+naturally, and Google's guidance is explicitly against publishing
+unreviewed machine-translated content at scale. The structure (routing,
+`hreflang`, sitemap) is test-covered; the prose is not.
+
+- [ ] **Read the `/id/` pages as a native speaker would.** Start with
+      the highest-traffic tools: `/id/`, `/id/tool/merge-pdf/`,
+      `/id/tool/compress-pdf/`, `/id/tool/convert-img/`.
+- [ ] **Check the search-facing copy first** — the `<title>` and meta
+      description are what people see before they click. Awkward
+      phrasing there costs more than anywhere else.
+- [ ] **Confirm format tokens stayed English** (PDF, JPG, ZIP, OCR,
+      AES-256): those are what people actually type into a search box.
+- [ ] Fix anything that reads like a translation in
+      `crates/pz-core/src/i18n_id.rs` and `i18n_seo_id.rs`.
+- [ ] **Do this before submitting the `/id/` URLs to Search Console.**
+
 ## 3. Service worker / offline  *(touched: `app/pwa/sw.js`, `scripts/build-web.sh`)*
 
 **Why not automated:** the test server and the Playwright harness don't

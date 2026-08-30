@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod i18n;
 pub mod seo;
 
 use std::fmt;
