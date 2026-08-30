@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 dioxus = { workspace = true, features = ["router"] }
 pz-core = { workspace = true }
+pz-crypto = { workspace = true }
 pz-engine = { workspace = true }
 pz-img = { workspace = true }
 # PDF editor: bytes → JS (base64) and editor-state JSON from the overlay.

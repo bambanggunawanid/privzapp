@@ -36,6 +36,12 @@ pub fn Privacy() -> Element {
                     "described here in full before it ships."
                 }
             }
+            h2 { "The editor's autosave" }
+            ul {
+                li { "So a refresh doesn't cost you an hour's work, the PDF editor keeps a copy of the document you're editing on this device — encrypted with AES-256, in your browser's own storage. It is never sent anywhere." }
+                li { "It is offered back to you by name when you return; nothing is reopened without you clicking Restore." }
+                li { "Discard erases the encryption key immediately, which makes the saved copy unreadable, and anything left untouched for a day is dropped automatically." }
+            }
             h2 { "No dark patterns" }
             ul {
                 li { "No account, no email, no cookies banner because there are no tracking cookies." }

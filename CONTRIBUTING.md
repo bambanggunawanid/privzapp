@@ -67,6 +67,13 @@ Run `verify.sh` before every commit. Run `ui-test.sh` when you touch the
 editor, tool pages, or navigation — every UI regression that gets reported
 grows a test in `tests/ui/` so it can't come back.
 
+A few things genuinely resist automation: a real folder drag (the browser
+only builds the entry tree for a true OS drag), the service worker's
+install/update/offline cycle, stylus and touch input, and the Android
+build. `docs/MANUAL_QA.md` lists those with the reason each one can't be
+scripted and the exact steps to click — run the sections your change
+touches, and say in the PR which browser you used.
+
 ## Project layout in one minute
 
 - `app/` — Dioxus app (routes in `app/src/main.rs`, generic tool page in
@@ -97,9 +104,10 @@ test fails the build if the README tools table or CHANGELOG lags the registry
   The pre-commit hook and CI both run `scripts/check-secrets.py`.
 - **Compress tools never return more bytes than they got.** Keep that
   invariant for anything new that claims to shrink files.
-- **Telemetry schema changes need explicit owner sign-off** — the event
-  schema is a privacy contract (enumerable values only, no free-form
-  strings). Current builds send nothing at all.
+- **There is no telemetry, and adding any needs explicit owner sign-off.**
+  The app makes no network requests of its own — no analytics, no page
+  counters, no third-party scripts. `tests/ui/no-phone-home.spec.js`
+  fails the build if it ever does.
 - **CSP:** production serves a strict Content-Security-Policy from
   `deploy/security-headers.conf`. If your change loads a new kind of
   resource (fonts, workers, media), extend the policy there or it will work

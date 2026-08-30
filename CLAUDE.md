@@ -97,6 +97,15 @@ crates that compile to both native and wasm32.
 - Run the `privacy-reviewer` agent on telemetry/dependency/UI-copy changes
   and the `wasm-guard` agent on dependency/engine changes
   (`.claude/agents/`).
+- Manual-only checks live in `docs/MANUAL_QA.md` — add to it whenever you
+  ship something headless can't reach, and tell the owner which section
+  to run.
+- The editor autosaves its working document, encrypted, to IndexedDB
+  (ADR-0013: `app/src/autosave.rs` + `app/assets/autosave.js`; key in
+  localStorage so Discard is a crypto-shred). Any test touching the
+  `pz-editor` database MUST create the object store in `onupgradeneeded`
+  exactly like autosave.js does — a probe that opens it bare can win the
+  race, create an empty v1 database and silently break autosave.
 - This container is headless: service-worker and real drag-gesture
   behavior can't be verified here — flag what needs a manual browser pass
   instead of claiming it works. (Folder-drop logic IS testable: the specs

@@ -4091,6 +4091,7 @@ dependencies = [
  "futures-channel",
  "js-sys",
  "pz-core",
+ "pz-crypto",
  "pz-engine",
  "pz-img",
  "serde",

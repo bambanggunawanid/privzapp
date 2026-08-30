@@ -1095,3 +1095,16 @@ button.ghost:hover { color: var(--text); border-color: var(--muted); }
   .nav-links { gap: 12px; font-size: 0.9rem; }
   .content { padding: 20px 14px 60px; }
 }
+
+/* Editor autosave restore offer (ADR-0013). */
+.ed-restore {
+  border: 1px solid rgba(108, 140, 255, 0.35);
+  background: rgba(108, 140, 255, 0.08);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  text-align: left;
+}
+.ed-restore p { margin: 0 0 10px; }
+.ed-restore-actions { display: flex; gap: 8px; margin-bottom: 8px; }
+.ed-restore .muted.small { margin: 0; }

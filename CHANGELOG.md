@@ -47,6 +47,17 @@ same commit that makes it (see docs/CONTINUOUS_DOCUMENTATION.md).
   folder and one match arm in `app/src/icons.rs`.
 
 ### Added
+- **The PDF editor survives a refresh.** It autosaves the working
+  document to your browser's storage, encrypted with AES-256 and with
+  the key held separately, then offers it back by name when you return —
+  nothing is reopened without you clicking Restore (ADR-0013). Discard
+  erases the key immediately, which makes the copy unreadable, and
+  anything untouched for a day is dropped automatically. Entirely
+  on-device: no server, no account.
+- **`docs/MANUAL_QA.md`**: a checklist of the things headless tests
+  genuinely cannot cover — real folder drags, service-worker offline and
+  update cycles, stylus input, Android — with why each one resists
+  automation and exactly what to click.
 - **"Zero telemetry" is now a stated promise, and it is enforced.** The
   home page carries it as a badge, both the prerendered and runtime meta
   descriptions say it, and the Privacy page leads with "What we collect:

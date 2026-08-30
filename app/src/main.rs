@@ -4,6 +4,7 @@
 //! via WebView/WASM on the web. All file processing happens in-process
 //! through `pz-engine`; no bytes ever leave the device.
 
+mod autosave;
 mod engine;
 mod icons;
 mod ocr;

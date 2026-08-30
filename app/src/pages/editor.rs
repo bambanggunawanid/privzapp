@@ -288,6 +288,26 @@ pub fn EditorPage() -> Element {
     // View toggles.
     let mut ruler = use_signal(|| false);
     let mut grid = use_signal(|| false);
+    // Autosave (ADR-0013): what's restorable, and whether the user has
+    // dismissed the offer this session.
+    let mut restorable = use_signal(|| Option::<crate::autosave::Saved>::None);
+
+    // Ask once on mount, before anything is loaded.
+    use_future(move || async move {
+        if let Some(saved) = crate::autosave::peek().await {
+            restorable.set(Some(saved));
+        }
+    });
+
+    // Persist the working document whenever it changes — every applied
+    // operation, undo and redo included.
+    use_effect(move || {
+        if let Some((name, bytes)) = pdf() {
+            spawn(async move {
+                crate::autosave::save(&name, &bytes).await;
+            });
+        }
+    });
     // Section inputs.
     let mut wm_text = use_signal(String::new);
     let mut margin = use_signal(|| {
@@ -637,6 +657,7 @@ pub fn EditorPage() -> Element {
 
     rsx! {
         document::Script { src: EDITOR_JS }
+        document::Script { src: crate::autosave::AUTOSAVE_JS }
         if let Some(seo) = pz_core::seo::seo_for("edit-pdf") {
             document::Title { "{seo.title}" }
             document::Meta { name: "description", content: seo.description }
@@ -780,6 +801,54 @@ pub fn EditorPage() -> Element {
                         if !loaded {
                             div { class: "ed-drop",
                                 div { class: "panel ed-drop-card",
+                                    // Never restore silently: on a shared
+                                    // computer that would be alarming.
+                                    if let Some(saved) = restorable() {
+                                        div { class: "ed-restore",
+                                            p {
+                                                strong { "{saved.name}" }
+                                                " — unsaved edits from {saved.age_text()}."
+                                            }
+                                            div { class: "ed-restore-actions",
+                                                button {
+                                                    class: "primary small-btn",
+                                                    onclick: move |_| {
+                                                        spawn(async move {
+                                                            busy.set(true);
+                                                            if let Some((n, b)) = crate::autosave::load().await {
+                                                                match open_in_js(&b).await {
+                                                                    Ok(pages) => {
+                                                                        num_pages.set(pages);
+                                                                        history.set(Vec::new());
+                                                                        redo_stack.set(Vec::new());
+                                                                        pdf.set(Some((n, b)));
+                                                                        restorable.set(None);
+                                                                    }
+                                                                    Err(e) => error.set(e),
+                                                                }
+                                                            } else {
+                                                                error.set("that saved document could not be read".into());
+                                                                restorable.set(None);
+                                                            }
+                                                            busy.set(false);
+                                                        });
+                                                    },
+                                                    "Restore"
+                                                }
+                                                button {
+                                                    class: "ghost small-btn",
+                                                    onclick: move |_| {
+                                                        restorable.set(None);
+                                                        spawn(async move { crate::autosave::clear().await });
+                                                    },
+                                                    "Discard"
+                                                }
+                                            }
+                                            p { class: "muted small",
+                                                "Kept encrypted on this device only, and dropped after a day. Discard erases the key immediately."
+                                            }
+                                        }
+                                    }
                                     label { class: "dropzone", r#for: "pdf-in",
                                         span { class: "dz-icon", "⬆" }
                                         span { class: "dz-label", "Choose a PDF to edit" }
