@@ -18,10 +18,10 @@ for:
    new URLs or domains in code (not docs), `web_sys` features enabling
    requests. Engine crates (`crates/pz-*`) must have zero network code —
    flag even dev-dependencies that could hide it.
-2. **Telemetry contract**: any change to `pz_telemetry::Event` fields, new
-   free-form strings, size/duration buckets made finer, session ids
-   persisted. Any of these requires explicit owner sign-off — flag as
-   blocking.
+2. **Telemetry**: there is none, the crate was deleted, and that is the
+   product promise. Flag ANY re-introduction — an event queue, a beacon,
+   a page counter, a third-party script, a persisted id — as blocking and
+   requiring explicit owner sign-off, however anonymous it looks.
 3. **Data at rest**: writes outside the user-chosen download flow, caches
    of file bytes, localStorage/IndexedDB use.
 4. **UI copy drift**: changes weakening "nothing is uploaded" / "works

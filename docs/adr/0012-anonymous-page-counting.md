@@ -64,8 +64,10 @@ matching the owner's stated privacy promise could be written for it.
 - The footer promise changed from "no tracking" to "no ads" plus a
   "What we count →" link; the prerendered SEO copy now says "no ads, no
   third-party trackers". The copy stays literally true.
-- `pz-telemetry` (per-tool, opt-in event metrics) remains dormant and
-  is unaffected; the Privacy page states that plainly.
+- `pz-telemetry` (a dormant, never-wired event queue) was deleted
+  outright on 2026-08-30 for the same reason this ADR was reverted: in an
+  open-source repo, telemetry code that exists but is switched off still
+  costs you the conversation.
 - Offline/PWA behavior is untouched — an unsendable beacon fails
   silently and nothing depends on it.
 - Counting is per-view only: without sessions there are deliberately no

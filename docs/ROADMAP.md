@@ -87,8 +87,10 @@ path:
   page count. Search Console covers the traffic question for free.
   `deploy/goatcounter/` keeps the working sidecar, wired to nothing, as a
   starting point if a paid tier ever needs server-side features.
-- **Opt-in tool telemetry**: the queue still exists (`pz-telemetry`),
-  still dormant, still needs explicit schema sign-off before any wiring.
+- **Telemetry**: none, and none planned. The dormant `pz-telemetry` crate
+  was deleted 2026-08-30 — in an open-source repo a disabled telemetry
+  crate still makes every new contributor ask "so what do you collect?",
+  and the only answer worth having is that the code does not exist.
 
 ## Explicitly rejected
 

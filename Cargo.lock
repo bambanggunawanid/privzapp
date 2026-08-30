@@ -4298,15 +4298,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pz-telemetry"
-version = "0.1.0"
-dependencies = [
- "pz-crypto",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "qoi"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

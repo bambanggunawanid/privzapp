@@ -27,7 +27,6 @@ files never leave the device.**
                               │ pz-core │  types, registry, parsing
                               └─────────┘
 
-          pz-telemetry (opt-in, schema-constrained, not yet wired)
 ```
 
 ## Invariants (why it's built this way)
@@ -74,6 +73,7 @@ files never leave the device.**
   password vaults (see ADR-0003); CSPRNG via `getrandom` (OS or browser).
 - Compress tools never return more bytes than they were given (invariant
   tested in pz-img and pz-pdf).
-- `pz-telemetry` can only carry enumerable, bucketed fields — the `Event`
-  struct is the complete list of what could ever be sent, and v1 sends
-  nothing at all.
+- There is no telemetry crate and no analytics of any kind: the app makes
+  no network requests of its own, enforced by
+  `tests/ui/no-phone-home.spec.js`. The dormant `pz-telemetry` crate was
+  deleted on 2026-08-30 rather than left switched off (see ADR-0012).

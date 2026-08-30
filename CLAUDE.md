@@ -15,8 +15,12 @@ crates that compile to both native and wasm32.
   compile to wasm (future ffmpeg-wasm is a deliberate exception, isolated).
   `image` and `lopdf` are used with `default-features = false` for exactly
   this reason — don't re-enable defaults.
-- **Telemetry schema is a privacy contract.** Adding any field to
-  `pz_telemetry::Event` needs explicit user sign-off. No free-form strings.
+- **There is no telemetry, and adding any is a product decision.** The app
+  makes no network requests of its own; `tests/ui/no-phone-home.spec.js`
+  fails if it ever does. The `pz-telemetry` crate was deleted on purpose
+  (a dormant one still invites "so what do you collect?" from every new
+  contributor). Do not re-add telemetry, analytics or a beacon without
+  explicit owner sign-off.
   Analytics were built and then deliberately removed (ADR-0012, Reverted):
   the app sends NO requests of its own. `deploy/goatcounter/` keeps the
   working sidecar for a possible future paid tier, wired to nothing.
@@ -40,8 +44,6 @@ crates that compile to both native and wasm32.
   in-memory fixtures (see `sample_pdf` / `sample_png` helpers).
 - `crates/pz-crypto` — AES-256-GCM `seal`/`open`, password vaults
   (`seal_with_password`, `.pzv` format — ADR-0003), `sha256_hex`, CSPRNG.
-- `crates/pz-telemetry` — opt-in event queue; not wired into the UI yet
-  (v1 builds send nothing).
 - `docs/` — ARCHITECTURE, ROADMAP, CONTINUOUS_DOCUMENTATION (the "docs land
   with the code" contract), `adr/` decision records.
 

@@ -4,7 +4,6 @@ members = [
     "app",
     "crates/pz-core",
     "crates/pz-crypto",
-    "crates/pz-telemetry",
     "crates/pz-img",
     "crates/pz-pdf",
     "crates/pz-archive",
@@ -21,7 +20,6 @@ repository = "https://github.com/privzapp/privzapp"
 [workspace.dependencies]
 pz-core = { path = "crates/pz-core" }
 pz-crypto = { path = "crates/pz-crypto" }
-pz-telemetry = { path = "crates/pz-telemetry" }
 pz-img = { path = "crates/pz-img" }
 pz-pdf = { path = "crates/pz-pdf" }
 pz-archive = { path = "crates/pz-archive" }

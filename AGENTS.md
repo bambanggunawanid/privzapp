@@ -45,7 +45,8 @@ without permission prompts.
 
 ## Hard "ask first" lines
 
-- Any field added to `pz_telemetry::Event` (privacy contract).
+- Anything that makes the app send a network request of its own — there
+  is no telemetry in this project and that is a product promise.
 - Anything that sends bytes anywhere (rejected by design).
 - Reducing PBKDF2 rounds or changing the `.pzv` format (ADR-0003).
 - Landing Web-Worker/PWA behavior changes without a manual browser test

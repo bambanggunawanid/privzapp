@@ -63,4 +63,4 @@ alike.
   existing items are fully documented.
 - **Later**: publish rustdoc + these docs as a static site alongside the
   app; a public "what we collect" page generated from the
-  `pz_telemetry::Event` schema so the privacy contract is user-auditable.
+  the Privacy page and README, so the privacy contract stays user-auditable.

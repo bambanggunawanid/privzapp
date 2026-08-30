@@ -23,11 +23,17 @@ pub fn Privacy() -> Element {
             }
             h2 { "Telemetry" }
             ul {
-                li { "Current builds send nothing at all. Zero requests." }
+                li { "Zero. The app sends no requests of its own — not on load, not when you run a tool, not ever." }
                 li {
-                    "A future opt-in (default off) may count anonymous, bucketed events — "
-                    "\"a PDF merge under 10 MB succeeded on web\" — never filenames, "
-                    "contents, or identifiers, and this page will list it first."
+                    "There is no telemetry code in the project to switch on, either: "
+                    "we deleted the unused event-queue crate rather than leave it "
+                    "sitting there disabled. The source is public — check for "
+                    "yourself, and note that an automated test fails the build if the "
+                    "app ever contacts another host."
+                }
+                li {
+                    "If that ever changes it will be opt-in, off by default, and "
+                    "described here in full before it ships."
                 }
             }
             h2 { "No dark patterns" }

@@ -25,9 +25,9 @@ donations, not by your data.
    The web app keeps working with the network unplugged.
 2. **Zero telemetry.** The app makes no network requests of its own — no
    analytics, no page counters, no third-party scripts, no cookies. A UI
-   test enforces it (`tests/ui/no-phone-home.spec.js`). If per-tool metrics
-   ever ship they will be opt-in and bucketed (see `crates/pz-telemetry`) —
-   never filenames, contents, or ids.
+   test enforces it (`tests/ui/no-phone-home.spec.js`). There is no
+   telemetry code in this repository at all — not disabled, not dormant,
+   absent.
 3. **Free forever, no dark patterns.** No accounts, no ads, no premium tier,
    no data sales. Revenue is donations only.
 4. **Security first.** `#![forbid(unsafe_code)]` across all engine crates,
@@ -47,7 +47,6 @@ privzapp/
 │   ├── pz-img          Convert / resize / compress         (image, pure Rust)
 │   ├── pz-archive      ZIP create / extract with safety guards
 │   ├── pz-crypto       AES-256-GCM sealing, SHA-256, CSPRNG helpers
-│   └── pz-telemetry    Opt-in anonymous telemetry (schema-constrained)
 ```
 
 Everything in `crates/` is pure computation on in-memory bytes — no I/O, no
