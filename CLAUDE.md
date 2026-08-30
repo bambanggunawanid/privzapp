@@ -66,8 +66,14 @@ crates that compile to both native and wasm32.
   (installed via `git config core.hooksPath .githooks`) and the verify
   script both run `scripts/check-secrets.py`; avoid scanner-bait patterns
   like `password: "..."` (a quoted literal) even in tests (build test
-  passphrases with
-  `join()` — see pz-engine). Commits carry NO Co-Authored-By/AI trailer.
+  passphrases with `join()` — see pz-engine). In shell, never combine a
+  credential-shaped variable name with the `:?` error-if-unset expansion:
+  GitGuardian reads the message after `?` as an assigned value and opens
+  an incident on a line containing no secret (this happened — commit
+  60bf108). Use an explicit `[ -z "$VAR" ]` test instead. check-secrets.py
+  blocks that shape via BAIT_PATTERNS, which bypasses the placeholder
+  filter on purpose — and yes, it will block your documentation too if you
+  spell the pattern out. Commits carry NO Co-Authored-By/AI trailer.
 - Wasm check alone (the important one):
   `cargo check -p privzapp --target wasm32-unknown-unknown`
 - Dev server: `cd app && dx serve --platform web`

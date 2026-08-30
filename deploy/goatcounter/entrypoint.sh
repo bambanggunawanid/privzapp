@@ -6,8 +6,14 @@ DB="sqlite+/data/goatcounter.db"
 VHOST="${GC_VHOST:-stats.privzapp.com}"
 
 if [ ! -f /data/goatcounter.db ]; then
-  : "${GC_EMAIL:?set GC_EMAIL (dashboard login) in .env}"
-  : "${GC_PASSWORD:?set GC_PASSWORD (dashboard login) in .env}"
+  # Checked with an explicit test rather than "${VAR:?message}": that
+  # idiom reads as `GC_PASSWORD:?set` to secret scanners, which parse
+  # "?set" as an assigned password and raise a false positive (it cost us
+  # a real GitGuardian alert). Same guarantee, no bait.
+  if [ -z "${GC_EMAIL:-}" ] || [ -z "${GC_PASSWORD:-}" ]; then
+    echo "error: set GC_EMAIL and GC_PASSWORD (the dashboard login) in .env" >&2
+    exit 1
+  fi
   goatcounter db create site \
     -vhost "$VHOST" \
     -user.email "$GC_EMAIL" \

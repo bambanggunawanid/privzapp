@@ -56,6 +56,22 @@ PATTERNS = [
     ),
 ]
 
+# Patterns that are NOT leaks but read like leaks to third-party scanners.
+# These deliberately skip the PLACEHOLDER filter below: looking like a
+# placeholder is precisely what makes them bait. Shell's
+# "${PASSWORD:?message}" is parsed by some detectors as PASSWORD being
+# assigned "?message" — that cost a real GitGuardian incident on a line
+# containing no secret at all. Use an explicit `[ -z "$VAR" ]` test
+# instead: same guarantee, nothing for anyone to triage.
+BAIT_PATTERNS = [
+    (
+        "scanner bait (no secret here): ${VAR:?...} on a credential-shaped name",
+        re.compile(
+            r"(?i)\$\{[A-Za-z0-9_]*(?:password|passwd|secret|token|api_?key|credential)[A-Za-z0-9_]*:\?"
+        ),
+    ),
+]
+
 # Values that are clearly placeholders, not live credentials.
 PLACEHOLDER = re.compile(r"(?i)example|changeme|placeholder|your[-_]|\$\{|^\{|x{6,}|•")
 WAIVER = "pz:allow-secret"
@@ -105,6 +121,10 @@ def main():
                 m = pattern.search(line)
                 if m and not PLACEHOLDER.search(m.group(0)):
                     findings.append((path, lineno, label, line.strip()[:120]))
+            # Bait is judged on the raw line: no placeholder exemption.
+            for label, pattern in BAIT_PATTERNS:
+                if pattern.search(line):
+                    findings.append((path, lineno, label, line.strip()[:120]))
 
     if findings:
         print("✖ possible secrets — commit blocked (this repo is public):\n", file=sys.stderr)
@@ -112,6 +132,8 @@ def main():
             print(f"  {path}:{lineno}  [{label}]\n      {snippet}", file=sys.stderr)
         print(
             "\nMove real credentials to .env (gitignored; template: .env.example).\n"
+            "Flagged as bait? There is no secret — reword it so external\n"
+            "scanners don't raise a false positive on the public repo.\n"
             f"False positive? Append `{WAIVER}` to that line.",
             file=sys.stderr,
         )
