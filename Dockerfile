@@ -50,6 +50,7 @@ FROM docker.io/library/nginx:1.27-alpine
 
 COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
 COPY deploy/security-headers.conf /etc/nginx/pz-security-headers.conf
+COPY deploy/gc-stub.conf /etc/nginx/pz-gc.conf
 COPY --from=builder /src/target/dx/privzapp/release/web/public /usr/share/nginx/html
 
 EXPOSE 80

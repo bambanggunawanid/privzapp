@@ -24,6 +24,12 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET' || url.origin !== self.location.origin) {
     return; // never touch cross-origin traffic; the app makes none anyway
   }
+  if (url.pathname === '/gc/count') {
+    // The visit-count beacon (ADR-0012) must reach the network every
+    // time — a cached response would silently stop counting returning
+    // visitors (and could pin the single-container 204 stub forever).
+    return;
+  }
 
   if (event.request.mode === 'navigate') {
     event.respondWith(

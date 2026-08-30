@@ -25,9 +25,13 @@ donations, not by your data.
    The web app keeps working with the network unplugged.
 2. **Free forever, no dark patterns.** No accounts, no ads, no premium tier,
    no data sales. Revenue is donations only.
-3. **Telemetry is opt-in, anonymous, and bucketed.** Current builds send
-   *nothing at all*. The future opt-in schema (see `crates/pz-telemetry`) can
-   only carry enumerable, coarse facts — never filenames, contents, or ids.
+3. **Nothing about you or your files is collected.** The one thing counted
+   is anonymous page visits — the page's path plus the visit's country, on
+   our own server, with an off switch and GPC/DNT honored
+   ([the full list](docs/adr/0012-anonymous-page-counting.md)). Per-tool
+   telemetry stays opt-in and dormant (see `crates/pz-telemetry`): its
+   schema can only ever carry enumerable, coarse facts — never filenames,
+   contents, or ids.
 4. **Security first.** `#![forbid(unsafe_code)]` across all engine crates,
    AES-256-GCM for anything PII-adjacent (`pz-crypto`), zip-slip and zip-bomb
    guards in `pz-archive`.
@@ -133,7 +137,9 @@ Details, designs and rationale live in [docs/ROADMAP.md](docs/ROADMAP.md).
 - [x] Image: batch rename, EXIF strip (privacy!), crop
 - [x] Video/GIF tools via ffmpeg compiled to WASM ([design](docs/adr/0005-ffmpeg-wasm.md), [implementation](docs/adr/0010-ffmpeg-wasm-integration.md))
 - [x] Password-protect any file (AES-256 `.pzv` vaults via `pz-crypto`)
-- [ ] Opt-in telemetry wiring + public dashboard of the little we collect
+- [x] Anonymous visit counting — self-hosted, page path + country and
+      nothing else, off-switch + GPC honored ([details](docs/adr/0012-anonymous-page-counting.md));
+      per-tool opt-in metrics (pz-telemetry) still to come
 - [x] Donation integrations ([Ko-fi](https://ko-fi.com/S7F125OT18), [GitHub Sponsors](https://github.com/sponsors/bambanggunawanid))
 
 ## Contributing

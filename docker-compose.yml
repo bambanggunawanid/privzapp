@@ -15,6 +15,11 @@ services:
     ports:
       - "8080:80"
     restart: unless-stopped
+    depends_on:
+      - goatcounter
+    volumes:
+      # Swap the /gc/count stub for the real sidecar proxy (ADR-0012).
+      - ./deploy/gc-proxy.conf:/etc/nginx/pz-gc.conf:ro
     # Hardening: the container only serves static files; nothing needs to
     # write anywhere except nginx's own tmp dirs.
     read_only: true
@@ -28,3 +33,25 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  # Anonymous page counting (ADR-0012): self-hosted GoatCounter,
+  # configured by its entrypoint to store ONLY page path + country.
+  # Dashboard: http://127.0.0.1:8091 (put behind your own subdomain,
+  # e.g. stats.privzapp.com, when exposing it publicly).
+  goatcounter:
+    build:
+      context: ./deploy/goatcounter
+    image: privzapp-goatcounter:latest
+    container_name: privzapp-goatcounter
+    restart: unless-stopped
+    environment:
+      GC_VHOST: ${GC_VHOST:-stats.privzapp.com}
+      GC_EMAIL: ${GC_EMAIL:-}
+      GC_PASSWORD: ${GC_PASSWORD:-}
+    ports:
+      - "127.0.0.1:8091:8080"
+    volumes:
+      - pz-gc-data:/data
+
+volumes:
+  pz-gc-data:

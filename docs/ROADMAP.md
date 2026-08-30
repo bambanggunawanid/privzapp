@@ -80,11 +80,14 @@ path:
 - ~~**Donation integrations**~~ — done 2026-08-24: `app/src/pages/support.rs`
   links the real Ko-fi (`ko-fi.com/S7F125OT18`) and GitHub Sponsors
   (`github.com/sponsors/bambanggunawanid`) accounts.
-- **Opt-in telemetry wiring**: the queue exists (`pz-telemetry`) but
-  transport + settings UI need (a) an endpoint the owner controls and
-  (b) explicit sign-off on the exact `Event` schema — it's a privacy
-  contract (CLAUDE.md ground rule), so no agent should wire it
-  unilaterally. The public dashboard ships with it, not after it.
+- **Analytics** — shipped 2026-08-30 (ADR-0012): anonymous page counting
+  via a self-hosted GoatCounter sidecar (path + country only, off-switch,
+  GPC honored). Owner actions remaining: set GC_EMAIL/GC_PASSWORD in
+  .env, and put the dashboard (127.0.0.1:8091) behind a subdomain —
+  GoatCounter's "public" site mode can serve as the public stats page.
+- **Opt-in tool telemetry**: the queue still exists (`pz-telemetry`),
+  still dormant, still needs explicit schema sign-off before any wiring —
+  page counting (above) is deliberately separate from per-tool events.
 
 ## Explicitly rejected
 

@@ -100,7 +100,7 @@ fn main() {
         (
             "privacy",
             "Privacy — PrivZapp Never Sees Your Files",
-            "How PrivZapp works: all processing happens in your browser via WebAssembly. No uploads, no accounts, no tracking, nothing to leak.",
+            "How PrivZapp works: all processing happens in your browser via WebAssembly. No uploads, no accounts, no ads, nothing to leak.",
         ),
         (
             "support",
@@ -167,7 +167,7 @@ fn main() {
     let mut llms = String::from(
         "# PrivZapp\n\n> Free in-browser file tools (PDF, image, archive, encryption). \
          All processing happens on-device via WebAssembly — files are never uploaded, \
-         there are no accounts and no tracking.\n\n## Tools\n",
+         there are no accounts, no ads and no third-party trackers.\n\n## Tools\n",
     );
     for tool in TOOLS {
         let seo = seo_for(tool.slug).expect("checked above");
