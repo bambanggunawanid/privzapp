@@ -20,49 +20,26 @@ used; several of these differ between Chromium, Firefox and Safari.
 
 ---
 
-## 1. Folder drag-and-drop  *(touched: `app/assets/dropdir.js`, `app/src/pages/tool.rs`, `pz-archive`)*
+## 1. Folder drag-and-drop  *(mostly automated now)*
 
-**Why not automated:** a real directory drop is the one thing Playwright
-cannot synthesize. `webkitGetAsEntry()` returns `null` for
-programmatically constructed `DataTransferItem`s, so the entry tree that
-the whole feature walks only exists during a genuine OS drag. The specs
-in `tests/ui/dropdir.spec.js` therefore enter through `pzIngestEntries`
-— the exact function the drop listener calls — and cover everything
-after that point. The gesture itself is what you are testing here.
+**This used to be a manual section.** It was written on the belief that a
+real directory drop couldn't be scripted — `webkitGetAsEntry()` does
+return `null` for programmatically built `DataTransferItem`s. That is
+true of the standard API, but Chrome DevTools Protocol's
+`Input.dispatchDragEvent` accepts real filesystem paths and Chrome builds
+a genuine entry tree from them. `tests/ui/dropdir.spec.js` now drops real
+folders from disk and covers relative paths, the >100-file `readEntries`
+batching, OS-clutter skipping, structure preserved in the archive, plain
+and mixed drops, and single-file tools staying inert.
 
-Prepare a folder with subfolders, e.g.
+What is still worth a human, because CDP drives Chromium only:
 
-```
-holiday/
-  notes.txt
-  photos/            # put 120+ files in here for step 4
-    img-001.jpg …
-    raw/
-      deep.txt
-```
-
-- [ ] **Drop a folder on Create ZIP.** Open `/tool/zip-files/`, drag
-      `holiday/` from the file manager onto the dropzone. Every file
-      appears in the list with its **relative path** (`photos/raw/deep.txt`,
-      not just `deep.txt`).
-- [ ] **The archive keeps the structure.** Run it, download the zip, open
-      it. Subfolders are preserved, and same-named files in different
-      subfolders both survive.
-- [ ] **OS clutter is skipped.** If the folder has `.DS_Store`,
-      `Thumbs.db` or `desktop.ini`, they are not in the list.
-- [ ] **Large directory.** Drop a folder with **more than 100 files** —
-      Chrome's `readEntries` returns at most 100 per call, so this proves
-      the walker keeps looping. All files must appear, not just 100.
-- [ ] **Plain file drops still work.** Select several loose files (no
-      folder) and drop them. They load through the normal path.
-- [ ] **Mixed drop.** Drop a folder *and* loose files together.
-- [ ] **Single-file tools are untouched.** Drop a folder on
-      `/tool/unzip/` (single-file) and on the editor. Nothing should be
-      swallowed or silently queued — the drop behaves as it did before.
-- [ ] **Second drop appends.** Drop one folder, then another; the file
-      list grows rather than being replaced.
-- [ ] **Firefox and Safari.** Repeat the first two steps. Directory entry
-      support differs; note anything that misbehaves.
+- [ ] **Firefox and Safari.** Drag a folder onto `/tool/zip-files/` in
+      each. Directory-entry support differs between engines; note
+      anything that misbehaves.
+- [ ] **A real file manager, once.** CDP synthesizes the drop faithfully
+      enough for the entry API, but dragging from Finder/Explorer/Nautilus
+      is the actual user gesture — worth one confirmation per platform.
 
 ## 2. Editor autosave  *(touched: `app/assets/autosave.js`, `app/src/autosave.rs`, `editor.rs` — ADR-0013)*
 

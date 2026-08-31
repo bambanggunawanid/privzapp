@@ -119,6 +119,11 @@ crates that compile to both native and wasm32.
 - Run the `privacy-reviewer` agent on telemetry/dependency/UI-copy changes
   and the `wasm-guard` agent on dependency/engine changes
   (`.claude/agents/`).
+- Real OS drag-and-drop IS testable headless: CDP
+  `Input.dispatchDragEvent` with `data.files = ["/abs/path"]` makes Chrome
+  build a genuine `webkitGetAsEntry` tree, including for directories (see
+  `tests/ui/dropdir.spec.js`). Playwright's own APIs can't — that's what
+  made this look impossible.
 - Manual-only checks live in `docs/MANUAL_QA.md` — add to it whenever you
   ship something headless can't reach, and tell the owner which section
   to run.

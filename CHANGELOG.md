@@ -14,6 +14,14 @@ editor workspace, the video and OCR tool families, folder drag-and-drop,
 editor autosave — and, deliberately, no telemetry.
 
 ### Fixed
+- Folder drag-and-drop is now covered by real automated drops rather than
+  a manual checklist. The tests previously entered through the walker's
+  entry point with synthetic objects, because `webkitGetAsEntry()` returns
+  null for programmatically built items — but Chrome DevTools Protocol's
+  `Input.dispatchDragEvent` takes real filesystem paths and Chrome builds
+  a genuine entry tree, directories included. The suite drops actual
+  folders and covers the >100-file batching, clutter skipping, structure
+  in the archive, mixed drops, and single-file tools staying inert.
 - The prerendered home page never linked any video tool: `seo-gen`
   listed categories by hand and was not updated when Video was added.
   It now derives them from the registry, so a new category can't be

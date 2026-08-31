@@ -67,10 +67,9 @@ Run `verify.sh` before every commit. Run `ui-test.sh` when you touch the
 editor, tool pages, or navigation — every UI regression that gets reported
 grows a test in `tests/ui/` so it can't come back.
 
-A few things genuinely resist automation: a real folder drag (the browser
-only builds the entry tree for a true OS drag), the service worker's
-install/update/offline cycle, stylus and touch input, and the Android
-build. `docs/MANUAL_QA.md` lists those with the reason each one can't be
+A few things genuinely resist automation: the service worker's
+install/update/offline cycle, stylus and touch input, cross-browser
+behavior (the suite runs Chromium only), and the Android build. `docs/MANUAL_QA.md` lists those with the reason each one can't be
 scripted and the exact steps to click — run the sections your change
 touches, and say in the PR which browser you used.
 
