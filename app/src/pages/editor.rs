@@ -76,7 +76,7 @@ async fn open_in_js(bytes: &[u8]) -> Result<usize, String> {
     );
     match eval(&js).await {
         Ok(v) => Ok(v.as_u64().unwrap_or(0) as usize),
-        Err(e) => Err(format!("could not render PDF: {e:?}")),
+        Err(e) => Err(crate::render::render_error(&format!("{e:?}"))),
     }
 }
 
@@ -1071,7 +1071,10 @@ pub fn EditorPage() -> Element {
                         }
                     }
 
-                    if !error.read().is_empty() {
+                    // Only once a document is open: before that the drop
+                    // card shows the load error, and rendering both put the
+                    // same message on screen twice.
+                    if loaded && !error.read().is_empty() {
                         p { class: "error", "{error}" }
                     }
                     if !notice.read().is_empty() {

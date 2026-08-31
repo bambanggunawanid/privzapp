@@ -361,6 +361,45 @@ test.describe("editor workspace", () => {
     expect((await download).suggestedFilename()).toBe("sample-pages.zip");
   });
 
+  // Regression: uploading a password-protected PDF dumped the raw eval
+  // failure ("Communication(...PasswordException...)") on the user, and
+  // rendered it twice. A protected PDF is a normal thing to try.
+  test("a password-protected PDF is refused with advice, not internals", async ({ page }) => {
+    await gotoEditor(page);
+    // Build one with the app's own Protect PDF tool.
+    const enc = await page.evaluate(async () => null); // keep lint quiet
+    void enc;
+    await page.goto("/tool/protect-pdf/");
+    await page.waitForSelector("#file-in", { state: "attached", timeout: 45_000 });
+    await page.setInputFiles("#file-in", {
+      name: "secret.pdf",
+      mimeType: "application/pdf",
+      buffer: samplePdf(),
+    });
+    await page.locator('input[type="password"]').first().fill("hunter2demo");
+    await page.locator(".actions button.primary").click();
+    await expect(page.locator(".results")).toBeVisible({ timeout: 30_000 });
+    const download = page.waitForEvent("download");
+    await page.locator(".results button", { hasText: "Download" }).click();
+    const protectedPdf = readFileSync(await (await download).path());
+
+    await gotoEditor(page);
+    await page.setInputFiles("#pdf-in", {
+      name: "secret-protected.pdf",
+      mimeType: "application/pdf",
+      buffer: protectedPdf,
+    });
+    const err = page.locator(".error");
+    await expect(err).toHaveCount(1, { timeout: 30_000 });
+    await expect(err).toContainText("password-protected");
+    await expect(err).toContainText("Unlock PDF");
+    // None of the internals may reach the user.
+    await expect(err).not.toContainText("PasswordException");
+    await expect(err).not.toContainText("Communication");
+    await expect(err).not.toContainText("PZ_ENCRYPTED");
+    await expect(page.locator(".pz-page")).toHaveCount(0);
+  });
+
   test("export downloads an edited PDF", async ({ page }) => {
     await openPdf(page);
     await page.locator("button", { hasText: "Export ↓" }).click();

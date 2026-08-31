@@ -127,6 +127,14 @@ pub(crate) const UI_ID: &[(&str, &str)] = &[
     // ---- editor ----
     ("Choose a PDF to edit", "Pilih PDF untuk diedit"),
     ("Rendering pages…", "Menyiapkan halaman…"),
+    (
+        "That PDF is password-protected, so its pages can't be opened. Remove the password first with the Unlock PDF tool (you'll need the password), then try again.",
+        "PDF itu dilindungi kata sandi, sehingga halamannya tidak bisa dibuka. Hapus dulu sandinya dengan alat Buka Kunci PDF (Anda perlu tahu sandinya), lalu coba lagi.",
+    ),
+    (
+        "That PDF could not be opened — it may be damaged. Try the Repair PDF tool first.",
+        "PDF itu tidak bisa dibuka — kemungkinan berkasnya rusak. Coba dulu alat Perbaiki PDF.",
+    ),
     ("Restore", "Pulihkan"),
     ("Discard", "Buang"),
     (

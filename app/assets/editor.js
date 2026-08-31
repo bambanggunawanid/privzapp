@@ -65,7 +65,17 @@ async function pzOpenB64(b64) {
 
 async function pzOpenParams(params) {
   const E = window.pzEd;
-  E.doc = await E.lib.getDocument(params).promise;
+  try {
+    E.doc = await E.lib.getDocument(params).promise;
+  } catch (e) {
+    // PDF.js reports an encrypted document by throwing PasswordException.
+    // Rethrow a stable marker the Rust side can turn into real advice —
+    // matching on the raw exception's Debug formatting would be brittle.
+    if (e && (e.name === "PasswordException" || e.code === 1)) {
+      throw new Error("PZ_ENCRYPTED");
+    }
+    throw e;
+  }
   E.pages = [];
   E.strokes = {};
   E.images = {};

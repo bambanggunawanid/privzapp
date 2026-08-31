@@ -31,7 +31,17 @@ function pzRenderBytes(b64) {
 // [{page, data}] with `data` base64 — the Rust side decodes, names and
 // packages them.
 async function pzRenderDoc(params, scale, mime, quality, pages) {
-  const doc = await R.lib.getDocument(params).promise;
+  let doc;
+  try {
+    doc = await R.lib.getDocument(params).promise;
+  } catch (e) {
+    // Same marker as editor.js: an encrypted PDF is a user problem with
+    // a clear fix, not an internal error to dump on them.
+    if (e && (e.name === "PasswordException" || e.code === 1)) {
+      throw new Error("PZ_ENCRYPTED");
+    }
+    throw e;
+  }
   try {
     let wanted = Array.isArray(pages) && pages.length ? pages : null;
     if (!wanted) {

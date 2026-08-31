@@ -25,6 +25,99 @@ const PDFJS_WORKER: Asset = asset!("/assets/pdfjs/pdf.worker.min.mjs");
 /// Waits for pdfrender.js (loaded via a `<script>` tag) before calling it.
 const WAIT_FOR_SCRIPT: &str = "for (let i = 0; i < 100 && typeof pzRenderInit === 'undefined'; i++) { await new Promise(r => setTimeout(r, 50)); } if (typeof pzRenderInit === 'undefined') { throw new Error('page renderer did not load'); }";
 
+/// Turn a raw eval failure into something worth showing a person.
+///
+/// The JS side rethrows `PZ_ENCRYPTED` for a password-protected
+/// document (see editor.js / pdfrender.js); everything else would
+/// otherwise reach the user as the `Debug` formatting of an eval error,
+/// wrapping a JSON dump of a JS exception — which tells them nothing.
+pub fn render_error(raw: &str) -> String {
+    // One line each: the catalog is keyed by the exact English text, so a
+    // wrapped literal would never match its translation.
+    if raw.contains("PZ_ENCRYPTED") {
+        return crate::tr(
+            "That PDF is password-protected, so its pages can't be opened. Remove the password first with the Unlock PDF tool (you'll need the password), then try again.",
+        );
+    }
+    // Anything else: keep the JS side's own message if it wrote one —
+    // "page 9 is out of range (1-2)" is far more useful than a generic
+    // apology, and swallowing it was a regression the tests caught.
+    if let Some(msg) = js_error_message(raw) {
+        return msg;
+    }
+    crate::tr("That PDF could not be opened — it may be damaged. Try the Repair PDF tool first.")
+}
+
+/// Pull the human-readable message out of the JS exception that an eval
+/// failure wraps. Two shapes occur in practice, both pinned by tests:
+///
+/// - a thrown `Error`  → `JsValue(Error: <message>\n<stack>)`
+/// - a PDF.js exception → `JsValue(Object({\"message\":\"<message>\", …}))`
+///
+/// The Debug formatting nests escaped JSON and escaped newlines, so this
+/// matches on those literal sequences rather than parsing.
+fn js_error_message(raw: &str) -> Option<String> {
+    let msg = if let Some(i) = raw.find("JsValue(Error: ") {
+        let rest = &raw[i + "JsValue(Error: ".len()..];
+        // Debug escapes the newline before the stack trace.
+        rest.split("\\n").next().unwrap_or(rest)
+    } else {
+        let key = "\\\"message\\\":\\\"";
+        let start = raw.find(key)? + key.len();
+        let rest = &raw[start..];
+        let end = rest.find("\\\"")?;
+        &rest[..end]
+    }
+    .trim();
+
+    // Only surface something that reads like a sentence for a person: no
+    // stack frames, no internal markers, nothing absurdly long.
+    if msg.is_empty()
+        || msg.len() > 200
+        || msg.contains("    at ")
+        || msg.contains("undefined")
+        || msg.starts_with("PZ_")
+    {
+        return None;
+    }
+    Some(msg.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::js_error_message;
+
+    // Captured from the real app, not invented — the two shapes a failed
+    // eval actually produces.
+    const THROWN_ERROR: &str = r#"Communication("Failed to await result - JsValue(Error: page 9 is out of range (1-2)\nError: page 9 is out of range (1-2)\n    at pzRenderDoc (http://127.0.0.1/assets/pdfrender.js:1:617)\n    at async eval (<anonymous>:5:358))")"#;
+    const PDFJS_OBJECT: &str = r#"Communication("Failed to await result - JsValue(Object({\"message\":\"No password given\",\"name\":\"PasswordException\",\"code\":1}))")"#;
+
+    #[test]
+    fn extracts_a_thrown_error_message_without_the_stack() {
+        assert_eq!(
+            js_error_message(THROWN_ERROR).as_deref(),
+            Some("page 9 is out of range (1-2)")
+        );
+    }
+
+    #[test]
+    fn extracts_a_pdfjs_exception_message() {
+        assert_eq!(
+            js_error_message(PDFJS_OBJECT).as_deref(),
+            Some("No password given")
+        );
+    }
+
+    #[test]
+    fn refuses_things_that_are_not_worth_showing() {
+        assert_eq!(js_error_message("Communication(\"nothing useful\")"), None);
+        assert_eq!(
+            js_error_message("JsValue(Error: PZ_ENCRYPTED\\n at x)"),
+            None
+        );
+    }
+}
+
 /// One rendered page, as `pdfrender.js` hands it back.
 #[derive(serde::Deserialize)]
 struct RenderedPage {
@@ -83,7 +176,7 @@ pub async fn render_pdf_pages(
     if let Some(u) = &url {
         revoke_object_url(u);
     }
-    let value = value.map_err(|e| format!("could not render the PDF: {e:?}"))?;
+    let value = value.map_err(|e| render_error(&format!("{e:?}")))?;
     let rendered: Vec<RenderedPage> =
         serde_json::from_value(value).map_err(|e| format!("unexpected render result: {e}"))?;
     if rendered.is_empty() {
