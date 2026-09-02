@@ -76,6 +76,14 @@ impl Route {
         }
     }
 
+    /// The tool this URL points at, in any locale.
+    pub fn tool_slug(&self) -> Option<&str> {
+        match self {
+            Route::ToolPage { slug } | Route::LocaleToolPage { slug, .. } => Some(slug),
+            _ => None,
+        }
+    }
+
     /// Which language this URL is in.
     pub fn locale(&self) -> Locale {
         match self {
@@ -178,10 +186,12 @@ fn App() -> Element {
 fn Shell() -> Element {
     let mut menu = use_signal(|| false);
     let route = use_route::<Route>();
-    let in_editor = matches!(&route, Route::ToolPage { slug } if slug == "edit-pdf");
+    let in_editor = route.tool_slug() == Some("edit-pdf");
     rsx! {
         header { class: "nav",
-            Link { class: "brand", to: route.in_locale(route.locale()),
+            // Home in the current locale. NOT route.in_locale(...), which
+            // means "this same page" and made the logo link to itself.
+            Link { class: "brand", to: Route::Home {}.in_locale(route.locale()),
                 img { class: "brand-logo", src: LOGO_NAV, alt: "PrivZapp" }
                 span { class: "brand-name", "PrivZapp" }
             }
@@ -274,17 +284,18 @@ fn Shell() -> Element {
                     pz_core::ToolCategory::Video,
                 ] {
                     div { class: "mega-col",
-                        h4 { {cat.label()} " tools" }
+                        h4 { {tr(&format!("{} tools", cat.label()))} }
                         for tool in pz_core::TOOLS.iter().filter(|t| t.category == cat) {
                             Link {
-                                to: Route::ToolPage { slug: tool.slug.to_string() },
+                                to: Route::ToolPage { slug: tool.slug.to_string() }
+                                    .in_locale(route.locale()),
                                 onclick: move |_| menu.set(false),
                                 if let Some(src) = icons::tool_icon(tool.slug) {
                                     img { class: "mega-ico mega-ico-svg", src, alt: "" }
                                 } else {
                                     span { class: "mega-ico", {tool.icon} }
                                 }
-                                {tool.name}
+                                {pz_core::i18n::tool_name(tool, route.locale())}
                             }
                         }
                     }
@@ -296,13 +307,17 @@ fn Shell() -> Element {
         }
         if !in_editor { footer { class: "footer",
             nav { class: "footer-links",
-                Link { to: Route::ToolPage { slug: "merge-pdf".into() }, "Merge PDF" }
-                Link { to: Route::ToolPage { slug: "compress-pdf".into() }, "Compress PDF" }
-                Link { to: Route::ToolPage { slug: "compress-img".into() }, "Compress Image" }
-                Link { to: Route::ToolPage { slug: "resize-img".into() }, "Resize Image" }
-                Link { to: Route::ToolPage { slug: "convert-img".into() }, "Convert Image" }
-                Link { to: Route::ToolPage { slug: "images-to-pdf".into() }, "JPG to PDF" }
-                Link { to: Route::ToolPage { slug: "zip-files".into() }, "Create ZIP" }
+                for slug in [
+                    "merge-pdf", "compress-pdf", "compress-img", "resize-img",
+                    "convert-img", "images-to-pdf", "zip-files",
+                ] {
+                    Link {
+                        to: Route::ToolPage { slug: slug.to_string() }.in_locale(route.locale()),
+                        {pz_core::tool_by_slug(slug)
+                            .map(|m| pz_core::i18n::tool_name(m, route.locale()))
+                            .unwrap_or(slug)}
+                    }
+                }
             }
             p { class: "footer-promise",
                 {tr("Your files never leave your device. No uploads, no accounts, no tracking.")}

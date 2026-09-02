@@ -53,6 +53,47 @@ test.describe("internationalisation", () => {
     expect(new URL(page.url()).pathname.startsWith("/id/")).toBe(false);
   });
 
+  // Regression: the brand logo was wired to route.in_locale(current)
+  // — "this same page in the same language", i.e. a link to itself — so
+  // clicking it did nothing and there was no way back to the home page.
+  test("the logo goes home, from any page and in any language", async ({ page }) => {
+    for (const [from, home] of [
+      ["/tool/merge-pdf/", "/"],
+      ["/privacy/", "/"],
+      ["/id/tool/merge-pdf/", "/id"],
+      ["/id/privacy/", "/id"],
+    ]) {
+      await page.goto(from);
+      await page.waitForSelector(".brand", { timeout: 45_000 });
+      await page.locator(".brand").click();
+      await expect(page.locator(".cat-chips")).toBeVisible({ timeout: 30_000 });
+      const path = new URL(page.url()).pathname.replace(/\/$/, "") || "/";
+      expect(path, `logo from ${from} should land on ${home}`).toBe(home);
+    }
+  });
+
+  test("chrome links keep the language you are reading in", async ({ page }) => {
+    await page.goto("/id/");
+    await page.waitForSelector(".cat-chips", { timeout: 45_000 });
+
+    // Footer tool links.
+    const footer = page.locator(".footer-links a").first();
+    await expect(footer).toHaveText("Gabung PDF");
+    await footer.click();
+    await expect(page).toHaveURL(/\/id\/tool\/merge-pdf/);
+
+    // Nav quick links (wide viewport only) and the all-tools menu.
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await page.goto("/id/");
+    await page.waitForSelector(".cat-chips", { timeout: 45_000 });
+    await expect(page.locator(".nav-quick").first()).toHaveText("Gabung PDF");
+    await page.locator(".nav-alltools").click();
+    const mega = page.locator(".megamenu a", { hasText: "Kompres PDF" }).first();
+    await expect(mega).toBeVisible();
+    await mega.click();
+    await expect(page).toHaveURL(/\/id\/tool\/compress-pdf/);
+  });
+
   // Canonical/hreflang/sitemap URLs use the BASE_URL baked in at build
   // time (the production origin), not the test server's address — so
   // discover it from the output rather than hardcoding a domain that
