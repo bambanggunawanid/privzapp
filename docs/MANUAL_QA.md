@@ -80,18 +80,24 @@ unreviewed machine-translated content at scale. The structure (routing,
       `crates/pz-core/src/i18n_id.rs` and `i18n_seo_id.rs`.
 - [ ] **Do this before submitting the `/id/` URLs to Search Console.**
 
-## 3. Service worker / offline  *(touched: `app/pwa/sw.js`, `scripts/build-web.sh`)*
+## 3. Service worker / offline  *(mostly automated now)*
 
-**Why not automated:** the test server and the Playwright harness don't
-exercise install/activate/update cycles realistically.
+Also formerly manual, on the same mistaken assumption as the folder
+drops. `tests/ui/pwa.spec.js` now checks that the worker registers and
+activates, that the app loads and navigates with the network genuinely
+disconnected (CDP `Network.emulateNetworkConditions`), and that sw.js,
+the manifest and the icons are served from the origin root. Automating
+it immediately caught a real bug: the worker had never been registering
+at all, so "works offline" was untrue.
+
+What still needs a human:
 
 - [ ] **Install the PWA** (address-bar install icon). It opens in its own
-      window with the right icon and name.
-- [ ] **Offline.** Load the site, then turn off networking (or devtools →
-      Network → Offline) and reload. The app still loads and tools still
-      run.
-- [ ] **Update flow.** Deploy a new build, reload twice. The new version
-      appears rather than a stale cached shell.
+      window with the right icon and name — the install prompt itself is
+      browser UI that CDP can't drive.
+- [ ] **Update flow.** Deploy a new build, reload twice, confirm the new
+      version appears rather than a stale cached shell. Needs two real
+      deploys, so it belongs to a release rather than a test run.
 - [ ] **Video/OCR offline.** Use a video tool and an OCR tool once while
       online (this downloads the ffmpeg / tesseract runtimes), then go
       offline and use them again — they should still work from cache.

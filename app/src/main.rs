@@ -173,7 +173,12 @@ fn App() -> Element {
         document::Link { rel: "apple-touch-icon", href: "/apple-touch-icon.png" }
         document::Link { rel: "icon", r#type: "image/png", href: LOGO }
         document::Script {
-            "if ('serviceWorker' in navigator) {{ window.addEventListener('load', () => {{ navigator.serviceWorker.register('/sw.js').catch(() => {{}}); }}); }}"
+            // Register immediately when the document has already loaded.
+            // Dioxus injects this script after the wasm boots, which is
+            // normally AFTER the load event — and a load listener added
+            // after load never fires, so the service worker was silently
+            // never registered and "works offline" was not true.
+            "if ('serviceWorker' in navigator) {{ const r = () => navigator.serviceWorker.register('/sw.js').catch(() => {{}}); if (document.readyState === 'complete') {{ r(); }} else {{ window.addEventListener('load', r); }} }}"
         }
         Router::<Route> {}
     }

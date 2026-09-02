@@ -124,6 +124,11 @@ crates that compile to both native and wasm32.
   build a genuine `webkitGetAsEntry` tree, including for directories (see
   `tests/ui/dropdir.spec.js`). Playwright's own APIs can't — that's what
   made this look impossible.
+- Service-worker behavior IS testable headless too: CDP
+  `Network.emulateNetworkConditions {offline:true}` plus reading
+  `navigator.serviceWorker.getRegistrations()` (see `tests/ui/pwa.spec.js`).
+  Registration must not wait on a `load` listener — Dioxus injects the
+  script after wasm boot, when `load` has already fired.
 - Manual-only checks live in `docs/MANUAL_QA.md` — add to it whenever you
   ship something headless can't reach, and tell the owner which section
   to run.

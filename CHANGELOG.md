@@ -14,6 +14,18 @@ editor workspace, the video and OCR tool families, folder drag-and-drop,
 editor autosave — and, deliberately, no telemetry.
 
 ### Fixed
+- **The service worker was never registering, so the app did not actually
+  work offline** despite saying so on the home page. It was registered
+  from a `load` listener added after the wasm booted — by which point
+  `load` had already fired, and a listener added then never runs. It now
+  registers immediately when the document is already loaded. Confirmed by
+  reloading with the network disconnected; `tests/ui/pwa.spec.js` pins
+  registration, activation and offline loading so it can't silently break
+  again.
+- The logo linked to the page you were already on instead of home, and
+  the footer links, the all-tools menu and the editor's footer-hiding all
+  ignored the current language — four bugs introduced by the i18n change
+  and invisible in English.
 - Folder drag-and-drop is now covered by real automated drops rather than
   a manual checklist. The tests previously entered through the walker's
   entry point with synthetic objects, because `webkitGetAsEntry()` returns
